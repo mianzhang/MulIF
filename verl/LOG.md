@@ -1,0 +1,8 @@
+# VERL changelog
+
+## GII/VIA reward integration (IFVerify)
+
+- **IfverifyGiiViaRewardManager** (`workers/reward_manager/ifverify_gii_via.py`): New reward manager that adds **GII** (Group Instruction-following Index) and **VIA** (variance of per-instruction pass rates) as extra rewards for response groups when the reward function is IFVerify (recast* / advancedif). Groups by `uid`; for each group builds a K×N matrix from `follow_instruction_list`, computes GII and VIA (same logic as `ifverify/calculate_inference_index.py`), and adds `gii_weight*GII + via_weight*VIA` to the reward. Config: `reward_manager: ifverify_gii_via` with `reward_kwargs` (`use_gii_via`, `gii_weight`, `via_weight`, `ifverify_data_sources`).
+- **if_verify evaluation** (`utils/reward_score/if_verify/evaluation.py`): Score dict now always includes `follow_instruction_list` for VERL so the GII/VIA manager can consume it.
+- **Validation metrics / wandb** (`trainer/ppo/metric_utils.py`): In `process_validation_metrics`, skip non-scalar reward_extra keys (e.g. `follow_instruction_list`, list of bools per sample) so they are not passed to `np.mean`/`np.std`/bootstrap and do not cause errors or nonsensical metrics when logging to wandb.
+- **Training metrics (avg GII/VIA)** (`trainer/ppo/metric_utils.py`): `compute_source_metrics` now logs per-source average **GII** and **VIA** (from `batch.non_tensor_batch['gii']` / `['via']`) alongside counts and average rewards, so these show up as scalar metrics (e.g. `source/<data_source>/gii`, `source/<data_source>/via`) in the trainer logs/wandb.
