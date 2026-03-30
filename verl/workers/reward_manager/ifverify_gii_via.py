@@ -17,26 +17,21 @@
 response groups when the reward function is IFVerify (recast* / advancedif).
 """
 
+import os
+import random
+import textwrap
+import time
 from collections import defaultdict
-from typing import Any, List, Set
+from typing import Any
 
 import numpy as np
 import torch
 
 from verl import DataProto
 from verl.utils.reward_score import default_compute_score
+from verl.utils.reward_score.ifverify.evaluation import compute_score_internal_batch
 from verl.workers.reward_manager import register
 from verl.workers.reward_manager.abstract import AbstractRewardManager
-
-
-def _is_ifverify_data_source(data_source: str, ifverify_sources: Set[str]) -> bool:
-    """True if this data_source should use IFVerify (and thus can have GII/VIA)."""
-    if not data_source:
-        return False
-    for prefix in ifverify_sources:
-        if data_source == prefix or data_source.startswith(prefix):
-            return True
-    return False
 
 
 def _prompt_gii(info_matrix: np.ndarray) -> float:
@@ -80,16 +75,74 @@ def _prompt_via(info_matrix: np.ndarray) -> float:
     return float(np.var(pass_rates))
 
 
+def _print_gii_via_debug_sample(
+    idx: int,
+    prompt_str: str,
+    mat: np.ndarray | None,
+    gii_v: float,
+    via_v: float,
+    final_r: float,
+) -> None:
+    """Pretty-print one random debug sample (stdout)."""
+    w = 88
+    line = "-" * w
+    raw_max = int(os.environ.get("IFVERIFY_DEBUG_PROMPT_MAX_CHARS", "2000"))
+    if len(prompt_str) > raw_max:
+        prompt_show = prompt_str[: max(0, raw_max - 3)] + "..."
+    else:
+        prompt_show = prompt_str
+    prompt_wrapped = textwrap.fill(
+        prompt_show,
+        width=w - 4,
+        break_long_words=True,
+        break_on_hyphens=True,
+        replace_whitespace=False,
+    )
+    prompt_lines = "\n".join(f"    {ln}" for ln in prompt_wrapped.splitlines()) or "    (empty)"
+
+    if mat is not None:
+        mat_block = np.array2string(
+            mat,
+            precision=4,
+            suppress_small=False,
+            floatmode="fixed",
+            max_line_width=w - 4,
+        )
+        mat_lines = "\n".join(f"    {ln}" for ln in mat_block.splitlines())
+        mat_note = f"    shape {mat.shape[0]}×{mat.shape[1]}  (rows = rollouts, cols = instructions)"
+    else:
+        mat_lines = "    (none — GII/VIA skipped: weights 0, or group too small / bad follow lists / no uid)"
+        mat_note = ""
+
+    print(line)
+    print(f"  ifverify_gii_via  ·  random debug sample  ·  batch index {idx}")
+    print(line)
+    print("  Prompt")
+    print(prompt_lines)
+    print()
+    print("  Matrix K×N  (binary pass/fail)")
+    if mat_note:
+        print(mat_note)
+    print(mat_lines)
+    print()
+    print("  Summary")
+    print(f"    {'gii':<22} {gii_v:>12.6f}")
+    print(f"    {'via':<22} {via_v:>12.6f}")
+    print(f"    {'final_reward (last tok)':<22} {final_r:>12.6f}")
+    print(line)
+    print()
+
+
 @register("ifverify_gii_via")
 class IfverifyGiiViaRewardManager(AbstractRewardManager):
     """Like NaiveRewardManager but adds GII and VIA as extra rewards for IFVerify response groups.
 
-    Only applies when data_source is one of the IFVerify sources (e.g. recast*, advancedif).
-    For each prompt group (same uid), builds a KxN matrix from follow_instruction_list,
-    computes GII and VIA, and adds gii_weight*GII + via_weight*VIA to each response's reward.
+    For each prompt group (same uid), builds a KxN matrix from per-response instruction
+    pass/fail (from ``compute_score``), computes GII and VIA, and adds
+    gii_weight*GII + via_weight*VIA to each response's reward.
+    ``follow_instruction_list`` is consumed internally for GII/VIA and is not returned in
+    ``reward_extra_info``.
     """
-
-    DEFAULT_IFVERIFY_SOURCES = ("recast", "advancedif")
 
     def __init__(
         self,
@@ -97,24 +150,17 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
         num_examine: int,
         compute_score: Any = None,
         reward_fn_key: str = "data_source",
-        use_gii_via: bool = True,
         gii_weight: float = 0.1,
         via_weight: float = 0.1,
-        ifverify_data_sources: List[str] | None = None,
         **kwargs: Any,
     ) -> None:
         self.tokenizer = tokenizer
         self.num_examine = num_examine
         self.compute_score = compute_score or default_compute_score
         self.reward_fn_key = reward_fn_key
-        self.use_gii_via = use_gii_via
         self.gii_weight = float(gii_weight)
         self.via_weight = float(via_weight)
-        self.ifverify_sources = set(
-            ifverify_data_sources
-            if ifverify_data_sources is not None
-            else list(self.DEFAULT_IFVERIFY_SOURCES)
-        )
+        _ = kwargs
 
     def __call__(self, data: DataProto, return_dict: bool = False) -> torch.Tensor | dict[str, Any]:
         if "rm_scores" in data.batch.keys():
@@ -127,12 +173,13 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_extra_info: dict[str, list] = defaultdict(list)
         already_print_data_sources: dict[str, int] = {}
-        # For GII/VIA: record reward position per index and collect follow_instruction_list
+        # For GII/VIA: per-index pass/fail lists from compute_score (not returned in reward_extra_info)
         last_reward_pos: list[int] = []
         uids = data.non_tensor_batch.get("uid")
-        data_sources: list[str] = []
 
-        for i in range(len(data)):
+        n = len(data)
+        score_inputs: list[tuple[str, str, Any, str, dict[str, Any]]] = []
+        for i in range(n):
             data_item = data[i]
             prompt_ids = data_item.batch["prompts"]
             prompt_length = prompt_ids.shape[-1]
@@ -146,29 +193,39 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
             ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
             data_source = data_item.non_tensor_batch[self.reward_fn_key]
-            data_sources.append(data_source)
-            extra_info = data_item.non_tensor_batch.get("extra_info", {})
+            base_extra = data_item.non_tensor_batch.get("extra_info", {})
+            extra_info = dict(base_extra) if base_extra else {}
             num_turns = data_item.non_tensor_batch.get("__num_turns__", None)
             rollout_reward_scores = data_item.non_tensor_batch.get("reward_scores", {})
             extra_info["num_turns"] = num_turns
             extra_info["rollout_reward_scores"] = rollout_reward_scores
 
-            score = self.compute_score(
-                data_source=data_source,
-                solution_str=response_str,
-                ground_truth=ground_truth,
-                extra_info=extra_info,
-            )
-
-            if isinstance(score, dict):
-                reward = score["score"]
-                for key, value in score.items():
-                    reward_extra_info[key].append(value)
-            else:
-                reward = score
-
             last_pos = int(valid_response_length - 1)
             last_reward_pos.append(last_pos)
+            score_inputs.append((prompt_str, response_str, ground_truth, data_source, extra_info))
+
+        max_workers = int(os.environ.get("REWARDS_SCORE_MAX_WORKERS", "32"))
+        batch_items = [(score_inputs[i][1], score_inputs[i][2]) for i in range(n)]
+        scores = compute_score_internal_batch(
+            batch_items,
+            strict=True,
+            return_verl_reward=True,
+            num_workers=max_workers,
+        )
+
+        follow_lists_internal: list[Any] = [None] * n
+        for i in range(n):
+            score = scores[i]
+            prompt_str, response_str, ground_truth, data_source, _ = score_inputs[i]
+
+            reward = score["score"]
+            for key, value in score.items():
+                if key == "follow_instruction_list":
+                    follow_lists_internal[i] = value
+                    continue
+                reward_extra_info[key].append(value)
+
+            last_pos = last_reward_pos[i]
             reward_tensor[i, last_pos] = reward
 
             if data_source not in already_print_data_sources:
@@ -178,27 +235,26 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
                 print("[prompt]", prompt_str)
                 print("[response]", response_str)
                 print("[ground_truth]", ground_truth)
-                if isinstance(score, dict):
-                    for k, v in score.items():
-                        print(f"[{k}]", v)
-                else:
-                    print("[score]", score)
+                for k, v in score.items():
+                    print(f"[{k}]", v)
 
-        # Add GII and VIA rewards per response group when IFVerify and use_gii_via
+        # Add GII/VIA-based extras per response group.
         n_items = len(data)
         reward_extra_info["gii"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
-        if self.use_gii_via and uids is not None and "follow_instruction_list" in reward_extra_info:
-            follow_lists = reward_extra_info["follow_instruction_list"]
+        # Per-group ratio of responses that follow all instructions.
+        reward_extra_info["prompt_acc"] = [0.0] * n_items
+        # KxN pass/fail matrix used for GII/VIA (shared within each uid group); None if not computed.
+        info_matrix_per_idx: list[np.ndarray | None] = [None] * n_items
+        # should_compute_gii_via = (self.gii_weight != 0.0) or (self.via_weight != 0.0)
+        if uids is not None:
+            follow_lists = follow_lists_internal
             uid_to_indices: dict[Any, list[int]] = defaultdict(list)
             for idx in range(n_items):
                 uid_to_indices[uids[idx]].append(idx)
 
-            for uid, indices in uid_to_indices.items():
+            for _, indices in uid_to_indices.items():
                 if len(indices) == 0:
-                    continue
-                ds = data_sources[indices[0]]
-                if not _is_ifverify_data_source(ds, self.ifverify_sources):
                     continue
                 rows = []
                 for idx in indices:
@@ -207,11 +263,10 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
                         break
                     rows.append([1 if b else 0 for b in fl])
                 else:
-                    if len(rows) < 2:
-                        continue
+                    all_follow_rate = float(np.mean([1.0 if all(r) else 0.0 for r in rows]))
+                    for idx in indices:
+                        reward_extra_info["prompt_acc"][idx] = all_follow_rate
                     n_inst = len(rows[0])
-                    if n_inst <= 1:
-                        continue
                     if not all(len(r) == n_inst for r in rows):
                         continue
                     info_matrix = np.array(rows, dtype=np.float32)
@@ -223,6 +278,24 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
                         reward_tensor[idx, pos] += bonus
                         reward_extra_info["gii"][idx] = gii
                         reward_extra_info["via"][idx] = via
+                        info_matrix_per_idx[idx] = info_matrix
+
+        # Random debug print: prompt, GII/VIA matrix, gii/via, final scalar reward at last token.
+        raw_n = os.environ.get("DEBUG_SAMPLES", "3")
+        try:
+            n_debug = max(0, int(raw_n))
+        except ValueError:
+            n_debug = 3
+        if n_items > 0 and n_debug > 0:
+            k = min(n_debug, n_items)
+            for idx in sorted(random.sample(range(n_items), k=k)):
+                prompt_str = score_inputs[idx][0]
+                mat = info_matrix_per_idx[idx]
+                gii_v = reward_extra_info["gii"][idx]
+                via_v = reward_extra_info["via"][idx]
+                last_pos = last_reward_pos[idx]
+                final_r = float(reward_tensor[idx, last_pos].item())
+                _print_gii_via_debug_sample(idx, prompt_str, mat, gii_v, via_v, final_r)
 
         if return_dict:
             return {

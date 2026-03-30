@@ -102,38 +102,10 @@ def default_compute_score(
 
         res = search_r1_like_qa_em.compute_score(solution_str, ground_truth)
     
-    elif data_source == "iftrain":
-        from .iftrain import compute_score as iftrain_compute_score
-
-        res = iftrain_compute_score(solution_str, ground_truth)
-    elif data_source == "ifbench":
-        from .ifbench import compute_score as ifbench_compute_score
-
-        res = ifbench_compute_score(solution_str, ground_truth)
-    elif data_source == "ifeval":
-        from .ifeval import compute_score as ifeval_compute_score
-
-        res = ifeval_compute_score(solution_str, ground_truth)
-    elif data_source.startswith("recast") or data_source == "advancedif":
-        # RECAST-style instruction-following data evaluated via the shared
-        # `framework/` evaluation stack.
+    elif data_source.startswith("ifverify"):
         from .ifverify import compute_score as ifverify_compute_score
 
         res = ifverify_compute_score(solution_str, ground_truth)
-    elif data_source == "logicif":
-        from . import logicif
-
-        res = logicif.compute_score(solution_str, ground_truth)
-    elif data_source == "infobench":
-        from . import infobench
-
-        res = infobench.compute_score(solution_str, ground_truth)
-    elif data_source == "deepscaler":
-        # DeepScaleR uses \boxed{} format, use math_dapo which handles Answer: \boxed{X} format
-        from . import math_dapo
-
-        res = math_dapo.compute_score(solution_str, ground_truth)
-
     else:
         raise NotImplementedError(f"Reward function is not implemented for {data_source=}")
 

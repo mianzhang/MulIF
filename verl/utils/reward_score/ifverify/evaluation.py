@@ -6,11 +6,16 @@ as a VERL reward function.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import os
 import re
-from typing import Dict, List, Any, Union, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 from .utils import import_ifverify_modules, MockInputExample
+
+logger = logging.getLogger(__name__)
 
 
 def remove_think_tags(text: str) -> str:
@@ -59,10 +64,11 @@ def evaluate_instruction_following(
     inp = MockInputExample(instruction_id_list=instruction_ids, kwargs=kwargs_list, mode_list=mode_list, prompt=prompt)
     prompt_to_response = {prompt: response}
 
-    if strict:
-        result = evaluation_lib.test_instruction_following_strict(inp, prompt_to_response)
-    else:
-        result = evaluation_lib.test_instruction_following_loose(inp, prompt_to_response)
+    result = asyncio.run(
+        evaluation_lib.test_instruction_following_strict_async(
+            inp, prompt_to_response
+        )
+    )
 
     return {
         "instruction_id_list": result.instruction_id_list,
@@ -80,78 +86,102 @@ def evaluate_instruction_following(
     }
 
 
-def compute_score_internal(
-    solution_str: str,
-    ground_truth: Union[str, Dict[str, Any]],
+def _output_example_to_reward_dict(
+    result: Any,
+    instruction_ids: List[str],
+) -> Dict[str, Any]:
+    """Map `OutputExample` to the same shape as `compute_score_internal` success output."""
+    return {
+        "instruction_id_list": result.instruction_id_list,
+        "prompt": result.prompt,
+        "response": result.response,
+        "follow_all_instructions": result.follow_all_instructions,
+        "follow_instruction_list": result.follow_instruction_list,
+        "num_instructions": len(instruction_ids),
+        "num_followed": sum(result.follow_instruction_list),
+        "accuracy": (
+            sum(result.follow_instruction_list) / len(instruction_ids)
+            if instruction_ids
+            else 0.0
+        ),
+    }
+
+
+def compute_score_internal_batch(
+    items: List[Tuple[str, Union[str, Dict[str, Any]]]],
     strict: bool = True,
     return_verl_reward: bool = True,
-) -> Dict[str, Any]:
-    """Compute the IFVerify instruction following score.
-
-    Expected `ground_truth` schema (as produced by RECAST → VERL conversion):
-
-        {
-          "instructions": [...],  # list of RECAST-style instruction dicts
-          "prompt": "<optional original prompt string>"
-        }
+    num_workers: int | None = None,
+) -> List[Dict[str, Any]]:
+    """Batch IFVerify scoring with one event loop and async strict eval (like ifverify/run_eval).
     """
-    try:
+    if not items:
+        return []
+
+    assert strict, "Loose evaluation is not supported for batch scoring."
+
+    _instructions_registry, evaluation_lib = import_ifverify_modules()
+
+    n = len(items)
+    slot: List[Dict[str, Any] | None] = [None] * n
+    pending: List[Tuple[int, Any, str, List[str]]] = []
+
+    for i, (solution_str, ground_truth) in enumerate(items):
         cleaned_solution = remove_think_tags(solution_str)
-
-        if isinstance(ground_truth, str):
-            gt_data: Dict[str, Any] = json.loads(ground_truth)
-        else:
-            gt_data = ground_truth
-
+        gt_data: Dict[str, Any] = (
+            json.loads(ground_truth)
+            if isinstance(ground_truth, str)
+            else ground_truth
+        )
         instructions = gt_data.get("instructions") or []
         prompt = gt_data.get("prompt", "")
-
         if not instructions:
-            raise ValueError("ground_truth must contain a non-empty 'instructions' list.")
-
-        eval_result = evaluate_instruction_following(
-            response=cleaned_solution,
-            instructions=instructions,
+            raise ValueError(
+                "ground_truth must contain a non-empty 'instructions' list."
+            )
+        instruction_ids, kwargs_list, mode_list = _prepare_instructions(
+            instructions
+        )
+        inp = MockInputExample(
+            instruction_id_list=instruction_ids,
+            kwargs=kwargs_list,
+            mode_list=mode_list,
             prompt=prompt,
-            strict=strict,
+        )
+        pending.append((i, inp, cleaned_solution, instruction_ids))
+
+    if pending:
+        pairs = [(inp, resp) for _, inp, resp, _ in pending]
+        if num_workers is None:
+            num_workers = int(os.environ.get("REWARDS_SCORE_MAX_WORKERS", "32"))
+        outputs = asyncio.run(
+            evaluation_lib.run_all_evals(
+                pairs,
+                evaluation_lib.test_instruction_following_strict_async,
+                num_workers,
+            )
         )
 
-        score = 1.0 if eval_result["follow_all_instructions"] else 0.0
-
-        # Always include follow_instruction_list so reward managers (e.g. GII/VIA) can use it.
-        base_out = {
-            "score": score,
-            "follow_instruction_list": eval_result["follow_instruction_list"],
-            "has_error": False,
-        }
-        if return_verl_reward:
-            return base_out
-        else:
-            return {
-                **base_out,
-                "follow_all_instructions": eval_result["follow_all_instructions"],
-                "num_instructions": eval_result["num_instructions"],
-                "num_followed": eval_result["num_followed"],
-                "accuracy": eval_result["accuracy"],
-                "evaluation_mode": "strict" if strict else "loose",
+        for (idx, inp, _cleaned, instruction_ids), out in zip(pending, outputs):
+            ev = _output_example_to_reward_dict(out, instruction_ids)
+            score = float(ev["accuracy"])
+            base_out: Dict[str, Any] = {
+                "score": score,
+                "follow_instruction_list": ev["follow_instruction_list"],
+                "has_error": False,
             }
+            if not return_verl_reward:
+                base_out = {
+                    **base_out,
+                    "follow_all_instructions": ev["follow_all_instructions"],
+                    "num_instructions": ev["num_instructions"],
+                    "num_followed": ev["num_followed"],
+                    "accuracy": ev["accuracy"],
+                    "evaluation_mode": "strict",
+                    "instruction_id_list": ev["instruction_id_list"],
+                    "prompt": ev["prompt"],
+                    "response": ev["response"],
+                }
+            slot[idx] = base_out
 
-    except Exception as e:
-        print(f"IFVerify Reward Score Error: {e}")
-        err_out = {
-            "score": 0.0,
-            "follow_instruction_list": [],
-            "has_error": True,
-        }
-        if return_verl_reward:
-            return err_out
-        return {
-            **err_out,
-            "error": str(e),
-            "follow_all_instructions": False,
-            "num_instructions": 0,
-            "num_followed": 0,
-            "accuracy": 0.0,
-            "evaluation_mode": "strict" if strict else "loose",
-        }
-
+    return [slot[i] for i in range(n)]

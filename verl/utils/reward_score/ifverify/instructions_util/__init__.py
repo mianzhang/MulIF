@@ -1,7 +1,4 @@
-"""Utility namespace for IFVerify instructions.
+"""Utility namespace for IFVerify instructions (IFBench + RECAST)."""
 
-Currently exposes the RECAST-specific helpers from `recast_instructions_util`.
-"""
-
-from . import recast_instructions_util  # noqa: F401
-
+from .ifbench_instructions_util import *  # noqa: F403
+from .recast_instructions_util import *  # noqa: F403

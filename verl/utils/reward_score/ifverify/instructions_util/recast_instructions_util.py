@@ -35,7 +35,7 @@ def normalize_lang_code(lang_code):
     return lang_code.lower().split("-")[0]
 
 
-def count_words(text, language):
+def count_words(text, language="en"):
     if not text.strip():
         return 0
     _ = language

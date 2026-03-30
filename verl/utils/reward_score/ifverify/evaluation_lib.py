@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import collections
 import dataclasses
+import inspect
 import json
-from typing import Dict, Optional, Union
+import logging
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import tqdm.asyncio
 
 from . import instructions_registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -26,14 +33,40 @@ class OutputExample:
     follow_instruction_list: list[bool]
 
 
-def test_instruction_following_strict(
+async def run_all_evals(
+    examples: List[Tuple[Any, str]],
+    eval_fn,
+    num_workers: int,
+) -> List[OutputExample]:
+    """Run many strict evaluations with a global concurrency limit (like ifverify/run_eval)."""
+    nw = 32 if num_workers is None else int(num_workers)
+    sem = asyncio.Semaphore(max(1, nw))
+
+    async def wrapped_task(inp: Any, response: str) -> OutputExample:
+        async with sem:
+            prompt_to_response = {inp.prompt: response}
+            if inspect.iscoroutinefunction(eval_fn):
+                return await eval_fn(inp, prompt_to_response)
+            return await asyncio.to_thread(eval_fn, inp, prompt_to_response)
+
+    tasks = [wrapped_task(inp, resp) for inp, resp in examples]
+    return await tqdm.asyncio.tqdm.gather(
+        *tasks, 
+        desc="IFVerify reward batch", 
+        mininterval=10.0,    # 每 2 秒才刷新一次屏幕（大幅降低终端渲染压力）
+        maxinterval=20.0,   # 最长不超过 10 秒刷新一次
+        smoothing=0.1       # 降低速度预测的波动感
+    )
+
+
+async def test_instruction_following_strict_async(
     inp: InputExample,
     prompt_to_response: Dict[str, str],
 ) -> OutputExample:
     response = prompt_to_response[inp.prompt]
     instruction_list = inp.instruction_id_list
     modes = inp.mode_list
-    is_following_list = []
+    tasks = []
 
     for index, instruction_id in enumerate(instruction_list):
         instruction_cls = instructions_registry.INSTRUCTION_DICT[instruction_id]
@@ -50,77 +83,23 @@ def test_instruction_following_strict(
             inp.kwargs[index].pop("description", None)
             instruction.build_description(**inp.kwargs[index])
 
-        if response and response.strip() and instruction.check_following(response):
-            is_following_list.append(True)
+        if instruction_id.startswith("rubric:"):
+            tasks.append(instruction.check_following_async(response))
         else:
+            tasks.append(asyncio.to_thread(instruction.check_following, response))
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    is_following_list = []
+    for instruction_id, result in zip(instruction_list, raw_results):
+        if isinstance(result, Exception):
+            logger.warning(
+                "Instruction check failed; marking as not-followed. instruction_id=%s error=%r",
+                instruction_id,
+                result,
+            )
             is_following_list.append(False)
-
-    return OutputExample(
-        instruction_id_list=inp.instruction_id_list,
-        prompt=inp.prompt,
-        response=response,
-        follow_all_instructions=all(is_following_list),
-        follow_instruction_list=is_following_list,
-    )
-
-
-def test_instruction_following_loose(
-    inp: InputExample,
-    prompt_to_response: Dict[str, str],
-) -> OutputExample:
-    response = prompt_to_response[inp.prompt]
-    if response is None:
-        return OutputExample(
-            instruction_id_list=inp.instruction_id_list,
-            prompt=inp.prompt,
-            response="",
-            follow_all_instructions=False,
-            follow_instruction_list=[False] * len(inp.instruction_id_list),
-        )
-
-    r = response.split("\n")
-    response_remove_first = "\n".join(r[1:]).strip()
-    response_remove_last = "\n".join(r[:-1]).strip()
-    response_remove_both = "\n".join(r[1:-1]).strip()
-    revised_response = response.replace("*", "")
-    revised_response_remove_first = response_remove_first.replace("*", "")
-    revised_response_remove_last = response_remove_last.replace("*", "")
-    revised_response_remove_both = response_remove_both.replace("*", "")
-    all_responses = [
-        response,
-        revised_response,
-        response_remove_first,
-        response_remove_last,
-        response_remove_both,
-        revised_response_remove_first,
-        revised_response_remove_last,
-        revised_response_remove_both,
-    ]
-    instruction_list = inp.instruction_id_list
-    is_following_list = []
-    modes = inp.mode_list
-    for index, instruction_id in enumerate(instruction_list):
-        instruction_cls = instructions_registry.INSTRUCTION_DICT[instruction_id]
-        instruction = instruction_cls(instruction_id, modes[index])
-        inp.kwargs[index] = {
-            key: value for key, value in inp.kwargs[index].items() if value is not None
-        }
-
-        if instruction_id.startswith("rubric:"):
-            instruction.build_description(prompt=inp.prompt, **inp.kwargs[index])
-        elif instruction_id.startswith("recast:"):
-            instruction.build_description(**inp.kwargs[index])
         else:
-            inp.kwargs[index].pop("description", None)
-            instruction.build_description(**inp.kwargs[index])
-
-        is_following = False
-        for r in all_responses:
-            if r.strip() and instruction.check_following(r):
-                is_following = True
-                break
-
-        is_following_list.append(is_following)
+            is_following_list.append(bool(result))
 
     return OutputExample(
         instruction_id_list=inp.instruction_id_list,
@@ -129,4 +108,3 @@ def test_instruction_following_loose(
         follow_all_instructions=all(is_following_list),
         follow_instruction_list=is_following_list,
     )
-

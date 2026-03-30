@@ -119,7 +119,6 @@ def load_reward_manager(
     # prime: PrimeRewardManager
     # batch: BatchRewardManager
     # dapo: DAPORewardManager
-    # ifverify_gii_via: IfverifyGiiViaRewardManager (GII/VIA extra rewards for IFVerify; use reward_kwargs: use_gii_via, gii_weight, via_weight, ifverify_data_sources)
     # Note(haibin.lin): For custom reward managers, please make sure they are imported and
     # registered via `verl.workers.reward_manager.register`
     # By default reward_manager is set to naive (NaiveRewardManager)

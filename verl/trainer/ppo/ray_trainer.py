@@ -518,6 +518,8 @@ class RayPPOTrainer:
         return gen_batch
 
     def _validate(self):
+        # GII/VIA need multiple rollouts per prompt; val is often n=1 so skip logging them.
+        skip_val_reward_extra_keys = frozenset({"gii", "via"})
         data_source_lst = []
         reward_extra_infos_dict: dict[str, list] = defaultdict(list)
 
@@ -605,6 +607,8 @@ class RayPPOTrainer:
             reward_extra_infos_dict["reward"].extend(scores)
             if "reward_extra_info" in result:
                 for key, lst in result["reward_extra_info"].items():
+                    if key in skip_val_reward_extra_keys:
+                        continue
                     reward_extra_infos_dict[key].extend(lst)
 
             # collect num_turns of each prompt
@@ -1261,6 +1265,19 @@ class RayPPOTrainer:
                         "training/epoch": epoch,
                     }
                 )
+                # Log batch-level IFVerify auxiliary metrics when available.
+                if reward_extra_infos_dict:
+                    for key in ("gii", "via", "prompt_acc"):
+                        values = reward_extra_infos_dict.get(key, None)
+                        if not values:
+                            continue
+                        arr = np.asarray(values, dtype=np.float32)
+                        if arr.size == 0:
+                            continue
+                        arr = arr[np.isfinite(arr)]
+                        if arr.size == 0:
+                            continue
+                        metrics[f"training/{key}"] = float(arr.mean())
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
