@@ -11,7 +11,7 @@ export DEBUG_SAMPLES=20
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$ROOT_DIR/verl_data/RECAST_train.parquet \
+    data.train_files=$ROOT_DIR/verl_data/RECAST_train_3c_12c.parquet \
     data.val_files="[$ROOT_DIR/verl_data/RECAST_c5.parquet, $ROOT_DIR/verl_data/RECAST_c10.parquet, $ROOT_DIR/verl_data/AdvancedIF.parquet, $ROOT_DIR/verl_data/IFBench.parquet]" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
@@ -32,10 +32,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.actor.fsdp_config.model_dtype=fp16 \
-    +actor_rollout_ref.actor.fsdp_config.mixed_precision.param_dtype=fp16 \
-    +actor_rollout_ref.actor.fsdp_config.mixed_precision.reduce_dtype=fp16 \
-    +actor_rollout_ref.actor.fsdp_config.mixed_precision.buffer_dtype=fp16 \
+    +actor_rollout_ref.actor.fsdp_config.mixed_precision.param_dtype=bf16 \
+    +actor_rollout_ref.actor.fsdp_config.mixed_precision.reduce_dtype=fp32 \
+    +actor_rollout_ref.actor.fsdp_config.mixed_precision.buffer_dtype=fp32 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
@@ -52,14 +51,16 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='baseline_qwen17b_fp16' \
+    trainer.experiment_name='baseline_3c-12c_qwen17b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.save_freq=25 \
-    trainer.val_before_train=True \
+    trainer.val_before_train=False \
     trainer.val_only=False \
     trainer.resume_mode=disable \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=200 > log/baseline_qwen17b_fp16.log
+    trainer.total_training_steps=200 > log/baseline_3c-12c_qwen17b.log
+
+    # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

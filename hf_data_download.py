@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script to download all data files from the RLIF Hugging Face repository.
-Downloads all files from billmianz/RLIF into verl_data/ directory.
+Script to download all data files from the MulIF Hugging Face repository.
+Downloads all files from billmianz/MulIF into verl_data/ directory.
 """
 
 import os
@@ -9,7 +9,7 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 
 def main():
-    repo_id = "billmianz/RLIF"
+    repo_id = "billmianz/MulIF"
     local_dir = "verl_data"
     
     hf_token = os.environ.get("HF_TOKEN")

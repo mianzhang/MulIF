@@ -6,8 +6,8 @@ model_cache_dir = 'hf_cache'
 
 model_pool = [
     # 'Qwen/Qwen3-0.6B',
-    # 'Qwen/Qwen3-1.7B',
-    'Qwen/Qwen3-4B',
+    'Qwen/Qwen3-1.7B',
+    # 'Qwen/Qwen3-4B',
     # 'Qwen/Qwen3-8B'
     ]
 

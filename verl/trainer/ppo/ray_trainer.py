@@ -1267,7 +1267,18 @@ class RayPPOTrainer:
                 )
                 # Log batch-level IFVerify auxiliary metrics when available.
                 if reward_extra_infos_dict:
-                    for key in ("gii", "via", "prompt_acc"):
+                    for key in (
+                        "gii",
+                        "via",
+                        "gii_norm",
+                        "via_norm",
+                        "gii_batch_min",
+                        "gii_batch_max",
+                        "via_batch_min",
+                        "via_batch_max",
+                        "gii_via_penalty",
+                        "prompt_acc",
+                    ):
                         values = reward_extra_infos_dict.get(key, None)
                         if not values:
                             continue

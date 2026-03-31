@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Reward manager that adds GII (Group Instruction-following Index) and VIA
-(Variance of Instruction-following Across rollouts) as extra rewards for
-response groups when the reward function is IFVerify (recast* / advancedif).
+"""Reward manager that applies GII (Group Instruction-following Index) and VIA
+(Variance of Instruction-following Across rollouts) as batch-normalized penalties
+for response groups when the reward function is IFVerify recast* / advancedif).
+Higher GII/VIA indicate worse exploration and reduce the reward after min--max
+normalization within the batch.
 """
 
 import os
@@ -135,11 +137,12 @@ def _print_gii_via_debug_sample(
 
 @register("ifverify_gii_via")
 class IfverifyGiiViaRewardManager(AbstractRewardManager):
-    """Like NaiveRewardManager but adds GII and VIA as extra rewards for IFVerify response groups.
+    """Like NaiveRewardManager but adjusts rewards with GII and VIA for IFVerify response groups.
 
     For each prompt group (same uid), builds a KxN matrix from per-response instruction
-    pass/fail (from ``compute_score``), computes GII and VIA, and adds
-    gii_weight*GII + via_weight*VIA to each response's reward.
+    pass/fail (from ``compute_score``), computes GII and VIA, min--max normalizes them
+    using batch extrema, and subtracts ``gii_weight * GII_norm + via_weight * VIA_norm``
+    from each response's reward (higher GII/VIA indicate worse exploration).
     ``follow_instruction_list`` is consumed internally for GII/VIA and is not returned in
     ``reward_extra_info``.
     """
@@ -238,15 +241,28 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
                 for k, v in score.items():
                     print(f"[{k}]", v)
 
+        def _min_max_norm(x: float, lo: float, hi: float) -> float:
+            if hi > lo:
+                return float((x - lo) / (hi - lo))
+            return 0.0
+
         # Add GII/VIA-based extras per response group.
         n_items = len(data)
         reward_extra_info["gii"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
+        reward_extra_info["gii_norm"] = [0.0] * n_items
+        reward_extra_info["via_norm"] = [0.0] * n_items
+        reward_extra_info["gii_batch_min"] = [0.0] * n_items
+        reward_extra_info["gii_batch_max"] = [0.0] * n_items
+        reward_extra_info["via_batch_min"] = [0.0] * n_items
+        reward_extra_info["via_batch_max"] = [0.0] * n_items
+        reward_extra_info["gii_via_penalty"] = [0.0] * n_items
         # Per-group ratio of responses that follow all instructions.
         reward_extra_info["prompt_acc"] = [0.0] * n_items
         # KxN pass/fail matrix used for GII/VIA (shared within each uid group); None if not computed.
         info_matrix_per_idx: list[np.ndarray | None] = [None] * n_items
-        # should_compute_gii_via = (self.gii_weight != 0.0) or (self.via_weight != 0.0)
+        # One (gii, via) per computed group for batch min/max.
+        batch_gii_via_pairs: list[tuple[float, float]] = []
         if uids is not None:
             follow_lists = follow_lists_internal
             uid_to_indices: dict[Any, list[int]] = defaultdict(list)
@@ -272,13 +288,40 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
                     info_matrix = np.array(rows, dtype=np.float32)
                     gii = _prompt_gii(info_matrix)
                     via = _prompt_via(info_matrix)
-                    bonus = self.gii_weight * gii + self.via_weight * via
+                    batch_gii_via_pairs.append((gii, via))
                     for idx in indices:
-                        pos = last_reward_pos[idx]
-                        reward_tensor[idx, pos] += bonus
                         reward_extra_info["gii"][idx] = gii
                         reward_extra_info["via"][idx] = via
                         info_matrix_per_idx[idx] = info_matrix
+
+            if batch_gii_via_pairs:
+                gii_min = min(g for g, _ in batch_gii_via_pairs)
+                gii_max = max(g for g, _ in batch_gii_via_pairs)
+                via_min = min(v for _, v in batch_gii_via_pairs)
+                via_max = max(v for _, v in batch_gii_via_pairs)
+            else:
+                gii_min = gii_max = via_min = via_max = 0.0
+
+            for idx in range(n_items):
+                reward_extra_info["gii_batch_min"][idx] = gii_min
+                reward_extra_info["gii_batch_max"][idx] = gii_max
+                reward_extra_info["via_batch_min"][idx] = via_min
+                reward_extra_info["via_batch_max"][idx] = via_max
+
+            for idx in range(n_items):
+                if info_matrix_per_idx[idx] is None:
+                    continue
+                gii = reward_extra_info["gii"][idx]
+                via = reward_extra_info["via"][idx]
+                gii_n = _min_max_norm(gii, gii_min, gii_max)
+                via_n = _min_max_norm(via, via_min, via_max)
+                reward_extra_info["gii_norm"][idx] = gii_n
+                reward_extra_info["via_norm"][idx] = via_n
+                # Penalize high GII/VIA (bad exploration): subtract weighted normalized terms.
+                penalty = self.gii_weight * gii_n + self.via_weight * via_n
+                pos = last_reward_pos[idx]
+                reward_tensor[idx, pos] -= penalty
+                reward_extra_info["gii_via_penalty"][idx] = penalty
 
         # Random debug print: prompt, GII/VIA matrix, gii/via, final scalar reward at last token.
         raw_n = os.environ.get("DEBUG_SAMPLES", "3")

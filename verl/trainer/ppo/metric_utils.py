@@ -540,8 +540,19 @@ def compute_source_metrics(batch: DataProto) -> dict[str, Any]:
         for source, rewards in source_rewards.items():
             metrics[f'source/{source}/reward'] = np.mean(rewards)
 
-    # Compute average GII/VIA per source if available (from reward_extra_info)
-    for key in ('gii', 'via'):
+    # Compute average IFVerify reward extras per source if available (from reward_extra_info)
+    for key in (
+        "gii",
+        "via",
+        "gii_norm",
+        "via_norm",
+        "gii_batch_min",
+        "gii_batch_max",
+        "via_batch_min",
+        "via_batch_max",
+        "gii_via_penalty",
+        "prompt_acc",
+    ):
         if key not in batch.non_tensor_batch:
             continue
         values = batch.non_tensor_batch[key]
