@@ -52,7 +52,7 @@ Run `python hf_model_download.py` to download the base models from huggingface. 
 
 ## Training
 ```
-sh recipe/mulif/baseline_3c-12c_qwen17b.sh
+sh recipe/mulif_ms/baseline_3c-12c_qwen17b.sh
 ```
 If OOM is encountered, considering decrease the value of `ppo_micro_batch_size` to 16.
 
