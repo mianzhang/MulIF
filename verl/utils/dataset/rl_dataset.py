@@ -34,6 +34,12 @@ from verl.utils.model import compute_position_id_with_mask
 logger = logging.getLogger(__name__)
 
 
+def configure_datasets_disk_check():
+    # Azure/FUSE-backed mounts can report zero free space via statvfs even when reads succeed.
+    if os.environ.get("HF_SKIP_DISK_CHECK", "1") == "1":
+        datasets.builder.has_sufficient_disk_space = lambda needed_bytes, directory=".": True
+
+
 def collate_fn(data_list: list[dict]) -> dict:
     """
     Collate a batch of sample dicts into batched tensors and arrays.
@@ -129,6 +135,7 @@ class RLHFDataset(Dataset):
             self.data_files[i] = copy_to_local(src=parquet_file, cache_dir=self.cache_dir, use_shm=self.use_shm)
 
     def _read_files_and_tokenize(self):
+        configure_datasets_disk_check()
         dataframes = []
         for parquet_file in self.data_files:
             # read parquet files and cache

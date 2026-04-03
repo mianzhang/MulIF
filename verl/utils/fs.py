@@ -31,6 +31,17 @@ __all__ = ["copy", "exists", "makedirs"]
 _HDFS_PREFIX = "hdfs://"
 
 
+def _configure_hf_downloads():
+    # Azure/FUSE-backed mounts can report zero free space via statvfs even when writes succeed.
+    if os.environ.get("HF_SKIP_DISK_CHECK", "1") != "1":
+        return
+    try:
+        import huggingface_hub.file_download as hf_file_download
+    except ImportError:
+        return
+    hf_file_download._check_disk_space = lambda *args, **kwargs: None
+
+
 def is_non_local(path):
     """Check if a path is a non-local (HDFS) path.
 
@@ -213,6 +224,7 @@ def copy_to_local(
 
     if use_shm and isinstance(local_path, str) and not os.path.exists(local_path):
         try:
+            _configure_hf_downloads()
             from huggingface_hub import snapshot_download
 
             resolved = snapshot_download(local_path)

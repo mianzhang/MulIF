@@ -19,6 +19,7 @@ import os
 import tempfile
 
 import pandas as pd
+import huggingface_hub.file_download as hf_file_download
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 
@@ -40,6 +41,12 @@ DEFAULT_USER_CONTENT_PREFIX = (
     "<answer> and </answer>, without detailed illustrations. For example, "
     "<answer> Beijing </answer>. Question: "
 )
+
+
+def configure_hf_downloads():
+    # Azure/FUSE-backed mounts can report zero free space via statvfs even when writes succeed.
+    if os.environ.get("HF_SKIP_DISK_CHECK", "1") == "1":
+        hf_file_download._check_disk_space = lambda *args, **kwargs: None
 
 
 def process_single_row(row, current_split_name, row_index):
@@ -99,6 +106,7 @@ def process_single_row(row, current_split_name, row_index):
 
 
 def main():
+    configure_hf_downloads()
     local_save_dir = os.path.expanduser(args.local_dir)
     os.makedirs(local_save_dir, exist_ok=True)
 
@@ -118,7 +126,6 @@ def main():
                     filename=parquet_filename,
                     repo_type="dataset",
                     local_dir=tmp_download_dir,
-                    local_dir_use_symlinks=False,
                 )
 
                 # Load and process Parquet file

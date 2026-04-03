@@ -17,14 +17,24 @@
 
 
 import argparse
+import os
 
+import huggingface_hub.file_download as hf_file_download
 from huggingface_hub import hf_hub_download
+
+
+def configure_hf_downloads():
+    # Azure/FUSE-backed mounts can report zero free space via statvfs even when writes succeed.
+    if os.environ.get("HF_SKIP_DISK_CHECK", "1") == "1":
+        hf_file_download._check_disk_space = lambda *args, **kwargs: None
+
 
 parser = argparse.ArgumentParser(description="Download files from a Hugging Face dataset repository.")
 parser.add_argument("--repo_id", type=str, default="PeterJinGo/wiki-18-e5-index", help="Hugging Face repository ID")
 parser.add_argument("--save_path", type=str, required=True, help="Local directory to save files")
 
 args = parser.parse_args()
+configure_hf_downloads()
 
 repo_id = "PeterJinGo/wiki-18-e5-index"
 for file in ["part_aa", "part_ab"]:

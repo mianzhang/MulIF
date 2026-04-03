@@ -1,9 +1,40 @@
 
 
-export $(grep -v '^#' .env | xargs)
+[ -f .env ] && export $(grep -v '^#' .env | xargs)
+export ROOT_DIR=${ROOT_DIR:-$(pwd)}
+export AZURE_STORAGE_ROOT=${AZURE_STORAGE_ROOT:-}
+
+if [ -n "$AZURE_STORAGE_ROOT" ]; then
+    DEFAULT_HF_HOME="$AZURE_STORAGE_ROOT/hf_home"
+    DEFAULT_HF_CACHE_DIR="$AZURE_STORAGE_ROOT/hf_cache"
+    DEFAULT_DATA_DIR="$AZURE_STORAGE_ROOT/verl_data"
+    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/baseline_3c-12c_qwen17b"
+    DEFAULT_WANDB_DIR="$AZURE_STORAGE_ROOT/wandb"
+    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/baseline_3c-12c_qwen17b"
+    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/baseline_3c-12c_qwen17b"
+else
+    DEFAULT_HF_HOME="$ROOT_DIR/.hf_home"
+    DEFAULT_HF_CACHE_DIR="$ROOT_DIR/hf_cache"
+    DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
+    DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
+    DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
+    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/baseline_3c-12c_qwen17b"
+    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/baseline_3c-12c_qwen17b"
+fi
+
+export HF_HOME=${HF_HOME:-$DEFAULT_HF_HOME}
+export HF_CACHE_DIR=${HF_CACHE_DIR:-$DEFAULT_HF_CACHE_DIR}
+export DATA_DIR=${DATA_DIR:-$DEFAULT_DATA_DIR}
+export RUN_LOG_DIR=${RUN_LOG_DIR:-$DEFAULT_RUN_LOG_DIR}
+export WANDB_DIR=${WANDB_DIR:-$DEFAULT_WANDB_DIR}
+export CKPT_DIR=${CKPT_DIR:-$DEFAULT_CKPT_DIR}
+export PROFILE_DIR=${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}
+export RESUME_MODE=${RESUME_MODE:-disable}
+export RESUME_FROM_PATH=${RESUME_FROM_PATH:-null}
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 n_gpus_per_node=8
-MODEL_PATH=$HF_CACHE_DIR/Qwen3-1.7B
+MODEL_PATH=$HF_CACHE_DIR/Qwen/Qwen3-1.7B
+mkdir -p "$RUN_LOG_DIR" "$WANDB_DIR" "$HF_HOME" "$HF_CACHE_DIR" "$DATA_DIR" "$CKPT_DIR" "$PROFILE_DIR"
 export OPENAI_RUBRIC_MODEL=gpt-5
 export REWARDS_SCORE_MAX_WORKERS=64
 export DEBUG_SAMPLES=20
@@ -11,8 +42,8 @@ export DEBUG_SAMPLES=20
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$ROOT_DIR/verl_data/RECAST_train_3c_12c.parquet \
-    data.val_files="[$ROOT_DIR/verl_data/RECAST_c5.parquet, $ROOT_DIR/verl_data/RECAST_c10.parquet, $ROOT_DIR/verl_data/AdvancedIF.parquet, $ROOT_DIR/verl_data/IFBench.parquet]" \
+    data.train_files=$DATA_DIR/RECAST_train_3c_12c.parquet \
+    data.val_files="[$DATA_DIR/RECAST_c5.parquet, $DATA_DIR/RECAST_c10.parquet, $DATA_DIR/AdvancedIF.parquet, $DATA_DIR/IFBench.parquet]" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=1024 \
@@ -54,13 +85,15 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name='baseline_3c-12c_qwen17b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
+    trainer.default_local_dir=$CKPT_DIR \
+    global_profiler.save_path=$PROFILE_DIR \
     trainer.save_freq=25 \
     trainer.val_before_train=True \
     trainer.val_only=False \
-    trainer.resume_mode=disable \
-    trainer.resume_from_path=null \
+    trainer.resume_mode=$RESUME_MODE \
+    trainer.resume_from_path=$RESUME_FROM_PATH \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=125 > log/baseline_3c-12c_qwen17b.log
+    trainer.total_training_steps=125 > "$RUN_LOG_DIR/baseline_3c-12c_qwen17b.log"
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

@@ -18,6 +18,7 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 import os
 import socket
 
+import datasets
 import hydra
 import ray
 from omegaconf import OmegaConf
@@ -30,6 +31,12 @@ from verl.trainer.ppo.utils import need_critic, need_reference_policy
 from verl.utils.config import validate_config
 from verl.utils.device import is_cuda_available
 from verl.utils.import_utils import load_extern_type
+
+
+def configure_datasets_disk_check():
+    # Azure/FUSE-backed mounts can report zero free space via statvfs even when reads succeed.
+    if os.environ.get("HF_SKIP_DISK_CHECK", "1") == "1":
+        datasets.builder.has_sufficient_disk_space = lambda needed_bytes, directory=".": True
 
 
 @hydra.main(config_path="config", config_name="ppo_trainer", version_base=None)
@@ -52,6 +59,8 @@ def run_ppo(config, task_runner_class=None) -> None:
                 model paths, and training hyperparameters.
         task_runner_class: For recipe to change TaskRunner.
     """
+    configure_datasets_disk_check()
+
     # Check if Ray is not initialized
     if not ray.is_initialized():
         # Initialize Ray with a local cluster configuration
@@ -246,6 +255,7 @@ class TaskRunner:
         print(f"TaskRunner hostname: {socket.gethostname()}, PID: {os.getpid()}")
         pprint(OmegaConf.to_container(config, resolve=True))
         OmegaConf.resolve(config)
+        configure_datasets_disk_check()
 
         actor_rollout_cls, ray_worker_group_cls = self.add_actor_rollout_worker(config)
         self.add_critic_worker(config)
