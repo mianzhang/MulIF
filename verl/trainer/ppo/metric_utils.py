@@ -544,14 +544,11 @@ def compute_source_metrics(batch: DataProto) -> dict[str, Any]:
     for key in (
         "gii",
         "via",
-        "gii_norm",
-        "via_norm",
-        "gii_batch_min",
-        "gii_batch_max",
-        "via_batch_min",
-        "via_batch_max",
-        "gii_via_penalty",
         "prompt_acc",
+        "pair_top_ii_thres",
+        "prompt_ii_bonus",
+        "prompt_ia_bonus",
+        "prompt_extra_bonus",
     ):
         if key not in batch.non_tensor_batch:
             continue
