@@ -546,9 +546,8 @@ def compute_source_metrics(batch: DataProto) -> dict[str, Any]:
         "via",
         "prompt_acc",
         "instruction_acc",
-        "pair_top_ii_thres",
-        "prompt_ii_bonus",
-        "prompt_ia_bonus",
+        "pair_bonus",
+        "single_bonus",
         "prompt_extra_bonus",
     ):
         if key not in batch.non_tensor_batch:

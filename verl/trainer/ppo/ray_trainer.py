@@ -1272,9 +1272,8 @@ class RayPPOTrainer:
                         "via",
                         "prompt_acc",
                         "instruction_acc",
-                        "pair_top_ii_thres",
-                        "prompt_ii_bonus",
-                        "prompt_ia_bonus",
+                        "pair_bonus",
+                        "single_bonus",
                         "prompt_extra_bonus",
                     ):
                         values = reward_extra_infos_dict.get(key, None)

@@ -4,7 +4,7 @@ export $(grep -v '^#' .env | xargs)
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 n_gpus_per_node=4
 MODEL_PATH=$HF_CACHE_DIR/Qwen3-1.7B
-export OPENAI_RUBRIC_MODEL=gpt-5
+export OPENAI_RUBRIC_MODEL=gpt-5.4-mini
 export REWARDS_SCORE_MAX_WORKERS=64
 export DEBUG_SAMPLES=20
 
