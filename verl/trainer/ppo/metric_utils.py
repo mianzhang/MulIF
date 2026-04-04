@@ -545,6 +545,7 @@ def compute_source_metrics(batch: DataProto) -> dict[str, Any]:
         "gii",
         "via",
         "prompt_acc",
+        "instruction_acc",
         "pair_top_ii_thres",
         "prompt_ii_bonus",
         "prompt_ia_bonus",

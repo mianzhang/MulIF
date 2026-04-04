@@ -1271,6 +1271,7 @@ class RayPPOTrainer:
                         "gii",
                         "via",
                         "prompt_acc",
+                        "instruction_acc",
                         "pair_top_ii_thres",
                         "prompt_ii_bonus",
                         "prompt_ia_bonus",

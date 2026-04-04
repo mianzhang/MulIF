@@ -470,6 +470,10 @@ class IfverifyGiiViaRewardManager(AbstractRewardManager):
                     continue
                 reward_extra_info[key].append(value)
 
+            # Per-response instruction accuracy (fraction of constraints satisfied); equals
+            # base reward before GII/VIA bonuses — batch mean is logged as training/instruction_acc.
+            reward_extra_info["instruction_acc"].append(float(score["score"]))
+
             last_pos = last_reward_pos[i]
             reward_tensor[i, last_pos] = reward
 
