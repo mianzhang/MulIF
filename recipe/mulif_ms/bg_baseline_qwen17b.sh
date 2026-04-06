@@ -8,18 +8,18 @@ if [ -n "$AZURE_STORAGE_ROOT" ]; then
     DEFAULT_HF_HOME="$AZURE_STORAGE_ROOT/hf_home"
     DEFAULT_HF_CACHE_DIR="$AZURE_STORAGE_ROOT/hf_cache"
     DEFAULT_DATA_DIR="$AZURE_STORAGE_ROOT/verl_data"
-    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/baseline_3c-12c_qwen17b"
+    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/bg_baseline_qwen17b"
     DEFAULT_WANDB_DIR="$AZURE_STORAGE_ROOT/wandb"
-    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/baseline_3c-12c_qwen17b"
-    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/baseline_3c-12c_qwen17b"
+    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/bg_baseline_qwen17b"
+    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/bg_baseline_qwen17b"
 else
     DEFAULT_HF_HOME="$ROOT_DIR/.hf_home"
     DEFAULT_HF_CACHE_DIR="$ROOT_DIR/hf_cache"
     DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
     DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
     DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
-    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/baseline_3c-12c_qwen17b"
-    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/baseline_3c-12c_qwen17b"
+    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/bg_baseline_qwen17b"
+    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/bg_baseline_qwen17b"
 fi
 
 export HF_HOME=${HF_HOME:-$DEFAULT_HF_HOME}
@@ -73,14 +73,13 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     actor_rollout_ref.ref.strategy=fsdp2 \
     algorithm.use_kl_in_reward=False \
-    reward_model.reward_manager=ifverify_gii_via \
+    reward_model.reward_manager=ifverify_bg \
     reward_model.launch_reward_fn_async=False \
-    +reward_model.reward_kwargs.gii_weight=0.0 \
-    +reward_model.reward_kwargs.via_weight=0.0 \
+    +reward_model.reward_kwargs.use_hit_rewards=False \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='baseline_3c-12c_qwen17b' \
+    trainer.experiment_name='bg_baseline_qwen17b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.default_local_dir=$CKPT_DIR \
@@ -92,6 +91,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=125 > "$RUN_LOG_DIR/baseline_3c-12c_qwen17b.log"
+    trainer.total_training_steps=125 > "$RUN_LOG_DIR/bg_baseline_qwen17b.log"
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

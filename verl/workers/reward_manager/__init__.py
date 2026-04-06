@@ -15,7 +15,9 @@
 from .registry import get_reward_manager_cls, register  # noqa: I001
 from .batch import BatchRewardManager
 from .dapo import DAPORewardManager
-from .ifverify_gii_via import IfverifyGiiViaRewardManager
+from .ifverify_sg_score import IfverifySgScoreRewardManager
+from .ifverify_bg import IfverifyBgRewardManager
+from .ifverify_sg_rank import IfverifySgRankRewardManager
 from .naive import NaiveRewardManager
 from .prime import PrimeRewardManager
 
@@ -23,7 +25,9 @@ from .prime import PrimeRewardManager
 __all__ = [
     "BatchRewardManager",
     "DAPORewardManager",
-    "IfverifyGiiViaRewardManager",
+    "IfverifyBgRewardManager",
+    "IfverifySgScoreRewardManager",
+    "IfverifySgRankRewardManager",
     "NaiveRewardManager",
     "PrimeRewardManager",
     "register",

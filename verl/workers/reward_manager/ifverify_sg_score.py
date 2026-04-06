@@ -17,11 +17,11 @@ low joint / marginal pass rates on a K×N binary ``info_matrix`` (K rollouts, N 
 
 Per-response bonuses (same structure as each other):
 
-- **Pair bonus**: For each of the **three** unordered pairs (i, j) with **lowest**
-  joint pass rate—fraction of rollouts where both instructions pass—if this
-  response passes both i and j, add ``gii_weight * (1 − pair_acc)``.
-- **Single bonus**: For each of the **three** instructions with **lowest** marginal
-  pass rate P_i, if this response passes i, add ``via_weight * (1 − P_i)``.
+- **Pair bonus**: For up to **three** unordered pairs (i, j) with **lowest**
+  joint pass rate among pairs with rate **> 0**—fraction of rollouts where both
+  instructions pass—if this response passes both i and j, add ``gii_weight * (1 − pair_acc)``.
+- **Single bonus**: For up to **three** instructions with **lowest** marginal pass
+  rate P_i among those with **P_i > 0**, if this response passes i, add ``via_weight * (1 − P_i)``.
 
 Config keys ``gii_weight`` / ``via_weight`` scale pair vs single bonuses.
 
@@ -111,7 +111,10 @@ def _marginal_pass_rates(info_matrix: np.ndarray) -> np.ndarray:
 def _lowest_pair_acc_mask_and_tuples(
     info_matrix: np.ndarray, n_inst: int, k: int = _LOW_ACC_K
 ) -> tuple[set[tuple[int, int]], tuple[LowPairAccEntry, ...]]:
-    """Lowest joint pass rates (# both pass / K): pair set (i < j) and ranked (i, j, pair_acc)."""
+    """Lowest joint pass rates (# both pass / K): pair set (i < j) and ranked (i, j, pair_acc).
+
+    Pairs with joint pass rate 0 are excluded. Returns at most ``min(k, #pairs with rate > 0)`` entries.
+    """
     if info_matrix.size == 0 or n_inst < 2:
         return set(), ()
     k_roll = int(info_matrix.shape[0])
@@ -122,6 +125,8 @@ def _lowest_pair_acc_mask_and_tuples(
         for j in range(i + 1, n_inst):
             both = float(np.sum(info_matrix[:, i] * info_matrix[:, j]))
             p_pair = both / k_roll
+            if p_pair <= 0:
+                continue
             scored.append((p_pair, i, j))
     scored.sort(key=lambda t: t[0])
     take = scored[: min(k, len(scored))]
@@ -133,11 +138,19 @@ def _lowest_pair_acc_mask_and_tuples(
 def _lowest_single_acc_mask_and_tuples(
     p_inst: np.ndarray, n_inst: int, k: int = _LOW_ACC_K
 ) -> tuple[set[int], tuple[LowAccEntry, ...]]:
-    """Lowest marginal pass rates P_i: instruction index set and ranked (idx, P_i)."""
+    """Lowest marginal pass rates P_i among instructions with P_i > 0.
+
+    Returns at most ``min(k, #instructions with P_i > 0)`` entries.
+    """
     if n_inst <= 0 or p_inst.size == 0:
         return set(), ()
-    order = np.argsort(p_inst.astype(np.float64))[: min(k, n_inst)]
-    inst_set = {int(i) for i in order}
+    nz = [i for i in range(n_inst) if float(p_inst[i]) > 0]
+    if not nz:
+        return set(), ()
+    nz.sort(key=lambda i: float(p_inst[i]))
+    take_n = min(k, len(nz))
+    order = nz[:take_n]
+    inst_set = set(order)
     ranked = tuple((int(i), float(p_inst[i])) for i in order)
     return inst_set, ranked
 
@@ -366,14 +379,14 @@ def _make_debug_rollouts(
     return out
 
 
-@register("ifverify_gii_via")
-class IfverifyGiiViaRewardManager(AbstractRewardManager):
+@register("ifverify_sg_score")
+class IfverifySgScoreRewardManager(AbstractRewardManager):
     """IFVerify group rewards: low joint-acc pair bonus and low marginal-acc single bonus.
 
     Groups by ``uid``; builds K×N from ``follow_instruction_list``, then adds per-response
-    bonuses: (a) ``gii_weight`` scales ``(1 − pair_acc)`` for the three pairs with lowest
-    joint pass rate when both pass; (b) ``via_weight`` scales ``(1 − P_i)`` for the three
-    lowest single-instruction pass rates when that instruction passes.
+    bonuses: (a) ``gii_weight`` scales ``(1 − pair_acc)`` for up to three pairs with lowest
+    positive joint pass rate when both pass; (b) ``via_weight`` scales ``(1 − P_i)`` for up
+    to three lowest positive single-instruction pass rates when that instruction passes.
     Also logs **GII** and **VIA** per group for monitoring.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
