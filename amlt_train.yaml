@@ -29,7 +29,7 @@ code:
   local_dir: ./
 
 jobs:
-  - name: mulif_baseline_3c-12c_qwen17b
+  - name: mulif_ms_bg_qwen17b
     sku: ${NODES}x${MEM}G${GPUS}
     process_count_per_node: 1
     sla_tier: Standard
@@ -50,9 +50,10 @@ jobs:
       - export RESUME_FROM_PATH=$${RESUME_FROM_PATH:-null}
       - mkdir -p $$AZURE_STORAGE_ROOT $$HF_HOME $$HF_CACHE_DIR $$DATA_DIR $$RUN_LOG_DIR $$WANDB_DIR
       - set +x && [ -n "$$HF_TOKEN" ] && huggingface-cli login --token $$HF_TOKEN || true && set -x
-      - python hf_data_download.py
-      - python hf_model_download.py
-      - bash recipe/mulif_ms/baseline_3c-12c_qwen17b.sh
+      # - python hf_data_download.py
+      # - python hf_model_download.py
+      # - bash recipe/mulif_ms/bg_baseline_qwen17b.sh
+      - bash recipe/mulif_ms/bg_qwen17b.sh
     submit_args:
       env:
         DATASET_MOUNT_BLOCK_BASED_CACHE_ENABLED: True

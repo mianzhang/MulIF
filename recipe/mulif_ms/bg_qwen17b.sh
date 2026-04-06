@@ -52,13 +52,13 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=64 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.strategy=fsdp2 \
-    actor_rollout_ref.model.enable_gradient_checkpointing=False \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     +actor_rollout_ref.actor.fsdp_config.mixed_precision.param_dtype=bf16 \
@@ -84,7 +84,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.default_local_dir=$CKPT_DIR \
     global_profiler.save_path=$PROFILE_DIR \
-    trainer.save_freq=25 \
+    trainer.save_freq=5 \
     trainer.val_before_train=True \
     trainer.val_only=False \
     trainer.resume_mode=auto \
