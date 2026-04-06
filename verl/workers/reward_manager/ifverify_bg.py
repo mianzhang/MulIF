@@ -24,11 +24,11 @@ make the pair rank as **harder** (more “low-acc”) and are prioritized for th
 **Final reward** (within a uid group, when the matrix is available):
 
 - **1.0** if this response passes **all** instructions.
-- Else **0.5** if it passes any **selected** low-acc single (``0 < P_i < 0.5``) or **both**
+- Else **0.1** if it passes any **selected** low-acc single (``0 < P_i < 0.5``) or **both**
   instructions of any **selected** low-acc pair (pair score in ``(0, 0.5)``).
 - Otherwise **0.0**.
 
-Config ``use_hit_rewards`` (default ``True``): when ``False``, the **0.5** branch is disabled;
+Config ``use_hit_rewards`` (default ``True``): when ``False``, the hit-reward branch is disabled;
 tensor reward is **1.0** only when all instructions pass, else **0.0**.
 
 Per uid group, **GII** and **VIA** are computed and logged as raw ``gii`` / ``via`` per sample.
@@ -53,6 +53,8 @@ from verl.workers.reward_manager.abstract import AbstractRewardManager
 _LOW_ACC_K = 1
 # Singles: 0 < P_i < this. Pairs: 0 < pair_score < this (both ends exclusive below this cap).
 _LOW_ACC_ELIGIBLE_MAX = 0.5
+# Tensor reward when a selected low-acc single or pair is hit but not all instructions pass.
+_HIT_REWARD = 0.1
 # (instruction i, instruction j, pair score both / min(pass_i, pass_j)); i < j.
 LowPairAccEntry = tuple[int, int, float]
 # (instruction index, marginal pass rate P_i).
@@ -184,7 +186,7 @@ def _low_acc_highlight_reward_for_row(
     low_pair_ranked: tuple[LowPairAccEntry, ...],
     use_hit_rewards: bool = True,
 ) -> float:
-    """Reward 1 if all instructions pass; else 0.5 (if use_hit_rewards) for low-acc hit; else 0."""
+    """Reward 1 if all instructions pass; else _HIT_REWARD if use_hit_rewards and low-acc hit."""
     if n_inst <= 0:
         return 0.0
     if bool(np.all(row[:n_inst] > 0)):
@@ -193,10 +195,10 @@ def _low_acc_highlight_reward_for_row(
         return 0.0
     for i in low_acc_inst:
         if 0 <= i < n_inst and row[i] > 0:
-            return 0.5
+            return float(_HIT_REWARD)
     for i, j, _p_pair in low_pair_ranked:
         if 0 <= i < n_inst and 0 <= j < n_inst and row[i] > 0 and row[j] > 0:
-            return 0.5
+            return float(_HIT_REWARD)
     return 0.0
 
 
@@ -276,7 +278,7 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
             print(f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}")
         if report.lowest_pair_accs:
             hit_note = (
-                "0.5 reward if both pass (when not all instructions pass)"
+                f"{_HIT_REWARD} reward if both pass (when not all instructions pass)"
                 if report.use_hit_rewards
                 else "hit rewards off — info only"
             )
@@ -288,7 +290,7 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
                 print(f"    #{rank}  (i={i}, j={j})  pair_score = {p_pair:.6f}")
         if report.low_acc_instructions:
             hit_note = (
-                "0.5 reward when idx passes (when not all instructions pass)"
+                f"{_HIT_REWARD} reward when idx passes (when not all instructions pass)"
                 if report.use_hit_rewards
                 else "hit rewards off — info only"
             )
@@ -324,7 +326,7 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
     print()
     if report.use_hit_rewards:
         final_rule = (
-            "final = 1 if all pass, else 0.5 if selected low-acc single/pair hit, else 0"
+            f"final = 1 if all pass, else {_HIT_REWARD} if selected low-acc single/pair hit, else 0"
         )
     else:
         final_rule = "final = 1 if all pass, else 0"
@@ -418,12 +420,12 @@ def _make_debug_rollouts(
 
 @register("ifverify_bg")
 class IfverifyBgRewardManager(AbstractRewardManager):
-    """IFVerify group rewards: 1.0 all pass; optional 0.5 low-acc hit; else 0.
+    """IFVerify group rewards: 1.0 all pass; optional hit reward on low-acc single/pair; else 0.
 
     Groups by ``uid``; builds K×N from ``follow_instruction_list``. Low-acc singles must
     have ``0 < P_i < 0.5``; low-acc pairs must have ``0 <`` pair score ``< 0.5`` (see module).
     When ``use_hit_rewards`` is **True** (default): tensor reward is **1.0** if all instructions
-    pass; **0.5** if not but the response hits any selected low-acc single or both ends of a
+    pass; **0.1** if not but the response hits any selected low-acc single or both ends of a
     selected low-acc pair; otherwise **0.0**. When ``use_hit_rewards`` is **False**, only **1.0**
     (all pass) or **0.0** apply.
     Also logs **GII** and **VIA** per group.
