@@ -31,12 +31,12 @@ make the pair rank as **harder** (more “low-acc”) and are prioritized for th
 Config ``use_hit_rewards`` (default ``True``): when ``False``, the hit-reward branch is disabled;
 tensor reward is **1.0** only when all instructions pass, else **0.0**.
 
-Per uid group, **GII** and **VIA** are computed and logged as raw ``gii`` / ``via`` per sample.
+Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
+``gii`` / ``via`` / ``icr`` per sample.
 """
 
 import os
 import random
-import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -49,133 +49,24 @@ from verl.utils.reward_score import default_compute_score
 from verl.utils.reward_score.ifverify.evaluation import compute_score_internal_batch
 from verl.workers.reward_manager import register
 from verl.workers.reward_manager.abstract import AbstractRewardManager
+from verl.workers.reward_manager.ifverify_utils import (
+    LowAccEntry,
+    LowPairAccEntry,
+    _LOW_ACC_ELIGIBLE_MAX,
+    _LOW_ACC_K,
+    _debug_sample_count,
+    _instruction_coverage_rate,
+    _lowest_pair_acc_mask_and_tuples,
+    _lowest_single_acc_mask_and_tuples,
+    _marginal_pass_rates,
+    _prompt_gii,
+    _prompt_via,
+    _truncate,
+    _wrap_indent,
+)
 
-_LOW_ACC_K = 1
-# Singles: 0 < P_i < this. Pairs: 0 < pair_score < this (both ends exclusive below this cap).
-_LOW_ACC_ELIGIBLE_MAX = 0.5
 # Tensor reward when a selected low-acc single or pair is hit but not all instructions pass.
 _HIT_REWARD = 0.1
-# (instruction i, instruction j, pair score both / min(pass_i, pass_j)); i < j.
-LowPairAccEntry = tuple[int, int, float]
-# (instruction index, marginal pass rate P_i).
-LowAccEntry = tuple[int, float]
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[: max(0, max_chars - 3)] + "..."
-
-
-def _prompt_gii(info_matrix: np.ndarray) -> float:
-    """GII from K×N binary matrix (K rollouts, N instructions)."""
-    if info_matrix.size == 0:
-        return 0.0
-    k, n = info_matrix.shape
-    if n <= 1:
-        return 0.0
-    counts = info_matrix.sum(axis=0)
-    p_i = counts / k
-    co_matrix = np.zeros((n, n), dtype=np.float32)
-    for i in range(n):
-        if counts[i] == 0:
-            continue
-        for j in range(n):
-            if counts[j] == 0:
-                continue
-            if i == j:
-                co_matrix[i, i] = p_i[i]
-                continue
-            both = np.sum(info_matrix[:, i] * info_matrix[:, j])
-            co_matrix[i, j] = both / counts[j]
-    gii_sum = 0.0
-    for i in range(n):
-        for j in range(n):
-            if i == j:
-                continue
-            gii_sum += co_matrix[i, i] - co_matrix[i, j]
-    return float(gii_sum / (n * (n - 1)))
-
-
-def _prompt_via(info_matrix: np.ndarray) -> float:
-    """Variance of per-instruction pass rates across rollouts (VIA)."""
-    if info_matrix.size == 0:
-        return 0.0
-    k = info_matrix.shape[0]
-    if k == 0:
-        return 0.0
-    pass_rates = info_matrix.sum(axis=0) / k
-    return float(np.var(pass_rates))
-
-
-def _marginal_pass_rates(info_matrix: np.ndarray) -> np.ndarray:
-    """P_i = fraction of rollouts passing instruction i; shape (N,)."""
-    if info_matrix.size == 0:
-        return np.zeros(0, dtype=np.float32)
-    k, _n = info_matrix.shape
-    if k <= 0:
-        return np.zeros(info_matrix.shape[1], dtype=np.float32)
-    return (info_matrix.sum(axis=0) / k).astype(np.float32)
-
-
-def _lowest_pair_acc_mask_and_tuples(
-    info_matrix: np.ndarray, n_inst: int, k: int = _LOW_ACC_K
-) -> tuple[set[tuple[int, int]], tuple[LowPairAccEntry, ...]]:
-    """Lowest pair scores: (both pass) / min(pass_i, pass_j), with i < j.
-
-    Equivalent to max(both/pass_i, both/pass_j) when both marginals are positive. For fixed
-    ``both``, **balanced** pass counts yield a **smaller** score than **imbalanced** ones (e.g.
-    1/9 vs 1/2 for 9/9 vs 16/2 with a single joint hit). Pairs with min(pass_i, pass_j) == 0
-    are skipped. Only pairs with ``0 < pair score < _LOW_ACC_ELIGIBLE_MAX`` are candidates.
-    """
-    if info_matrix.size == 0 or n_inst < 2:
-        return set(), ()
-    k_roll = int(info_matrix.shape[0])
-    if k_roll <= 0:
-        return set(), ()
-    counts = info_matrix.sum(axis=0)
-    scored: list[tuple[float, int, int]] = []
-    for i in range(n_inst):
-        for j in range(i + 1, n_inst):
-            ci = float(counts[i])
-            cj = float(counts[j])
-            denom = min(ci, cj)
-            if denom <= 0:
-                continue
-            both = float(np.sum(info_matrix[:, i] * info_matrix[:, j]))
-            pair_score = both / denom
-            if pair_score <= 0 or pair_score >= _LOW_ACC_ELIGIBLE_MAX:
-                continue
-            scored.append((pair_score, i, j))
-    scored.sort(key=lambda t: t[0])
-    take = scored[: min(k, len(scored))]
-    ranked = tuple((int(i), int(j), float(p)) for p, i, j in take)
-    pair_set = {(int(i), int(j)) for p, i, j in take}
-    return pair_set, ranked
-
-
-def _lowest_single_acc_mask_and_tuples(
-    p_inst: np.ndarray, n_inst: int, k: int = _LOW_ACC_K
-) -> tuple[set[int], tuple[LowAccEntry, ...]]:
-    """Lowest marginal pass rates among instructions with ``0 < P_i < _LOW_ACC_ELIGIBLE_MAX``.
-
-    Returns at most ``min(k, #eligible instructions)`` entries.
-    """
-    if n_inst <= 0 or p_inst.size == 0:
-        return set(), ()
-    nz = [
-        i
-        for i in range(n_inst)
-        if 0 < float(p_inst[i]) < _LOW_ACC_ELIGIBLE_MAX
-    ]
-    if not nz:
-        return set(), ()
-    nz.sort(key=lambda i: float(p_inst[i]))
-    take_n = min(k, len(nz))
-    order = nz[:take_n]
-    inst_set = set(order)
-    ranked = tuple((int(i), float(p_inst[i])) for i in order)
-    return inst_set, ranked
 
 
 def _low_acc_highlight_reward_for_row(
@@ -224,22 +115,11 @@ class IfverifyDebugReport:
     info_matrix: np.ndarray | None
     gii: float | None
     via: float | None
+    icr: float | None
     lowest_pair_accs: tuple[LowPairAccEntry, ...] | None
     low_acc_instructions: tuple[LowAccEntry, ...] | None
     use_hit_rewards: bool
     rollouts: tuple[IfverifyDebugRollout, ...]
-
-
-def _wrap_indent(text: str, width: int, indent: str) -> str:
-    wrapped = textwrap.fill(
-        text,
-        width=width,
-        break_long_words=True,
-        break_on_hyphens=True,
-        replace_whitespace=False,
-    )
-    lines = wrapped.splitlines() or ["(empty)"]
-    return "\n".join(f"{indent}{ln}" for ln in lines)
 
 
 def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
@@ -274,8 +154,11 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
         k, n_inst = mat.shape
         print(f"  task_id: {tid_s}")
         print(f"  size: K = {k} rollouts × N = {n_inst} instructions  (matrix rows = rollouts)")
-        if report.gii is not None and report.via is not None:
-            print(f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}")
+        if report.gii is not None and report.via is not None and report.icr is not None:
+            print(
+                f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}  ·  "
+                f"icr = {report.icr:.6f}  (instruction coverage rate)"
+            )
         if report.lowest_pair_accs:
             hit_note = (
                 f"{_HIT_REWARD} reward if both pass (when not all instructions pass)"
@@ -364,14 +247,6 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
     print()
 
 
-def _debug_sample_count() -> int:
-    raw = os.environ.get("DEBUG_SAMPLES", "3")
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return 3
-
-
 def _make_debug_rollouts(
     *,
     spotlight_idx: int,
@@ -428,7 +303,7 @@ class IfverifyBgRewardManager(AbstractRewardManager):
     pass; **0.1** if not but the response hits any selected low-acc single or both ends of a
     selected low-acc pair; otherwise **0.0**. When ``use_hit_rewards`` is **False**, only **1.0**
     (all pass) or **0.0** apply.
-    Also logs **GII** and **VIA** per group.
+    Also logs **GII**, **VIA**, and **ICR** per group.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
     """
@@ -533,6 +408,7 @@ class IfverifyBgRewardManager(AbstractRewardManager):
         reward_extra_info["prompt_acc"] = [0.0] * n_items
         reward_extra_info["gii"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
+        reward_extra_info["icr"] = [0.0] * n_items
         info_matrix_per_idx: list[np.ndarray | None] = [None] * n_items
         lowest_pair_accs_per_idx: list[tuple[LowPairAccEntry, ...] | None] = [None] * n_items
         low_acc_instructions_per_idx: list[tuple[LowAccEntry, ...] | None] = [None] * n_items
@@ -563,9 +439,11 @@ class IfverifyBgRewardManager(AbstractRewardManager):
                     info_matrix = np.array(rows, dtype=np.float32)
                     gii = _prompt_gii(info_matrix)
                     via = _prompt_via(info_matrix)
+                    icr = _instruction_coverage_rate(info_matrix)
                     for idx in indices:
                         reward_extra_info["gii"][idx] = gii
                         reward_extra_info["via"][idx] = via
+                        reward_extra_info["icr"][idx] = icr
                     p_inst = _marginal_pass_rates(info_matrix)
                     _, low_pair_ranked = _lowest_pair_acc_mask_and_tuples(
                         info_matrix, n_inst, k=_LOW_ACC_K
@@ -614,6 +492,7 @@ class IfverifyBgRewardManager(AbstractRewardManager):
                     info_matrix=mat,
                     gii=float(reward_extra_info["gii"][idx]) if has_metrics else None,
                     via=float(reward_extra_info["via"][idx]) if has_metrics else None,
+                    icr=float(reward_extra_info["icr"][idx]) if has_metrics else None,
                     lowest_pair_accs=lowest_pair_accs_per_idx[idx] if has_metrics else None,
                     low_acc_instructions=low_acc_instructions_per_idx[idx] if has_metrics else None,
                     use_hit_rewards=self.use_hit_rewards,

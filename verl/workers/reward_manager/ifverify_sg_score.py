@@ -13,24 +13,28 @@
 # limitations under the License.
 
 """Reward manager for IFVerify groups: pair- and single-instruction bonuses from
-low joint / marginal pass rates on a K×N binary ``info_matrix`` (K rollouts, N instructions).
+eligible low pair / single scores on a K×N binary ``info_matrix`` (K rollouts, N instructions).
 
-Per-response bonuses (same structure as each other):
+Selection matches ``ifverify_utils`` (same as ``ifverify_sg_rank`` / ``ifverify_bg``):
 
-- **Pair bonus**: For up to **three** unordered pairs (i, j) with **lowest**
-  joint pass rate among pairs with rate **> 0**—fraction of rollouts where both
-  instructions pass—if this response passes both i and j, add ``gii_weight * (1 − pair_acc)``.
-- **Single bonus**: For up to **three** instructions with **lowest** marginal pass
-  rate P_i among those with **P_i > 0**, if this response passes i, add ``via_weight * (1 − P_i)``.
+- **Pair bonus**: Among pairs with ``0 <`` (both pass) / ``min(pass_i, pass_j) < 0.5``, take
+  the **lowest** such scores; if this response passes both i and j, add
+  ``gii_weight * (1 − pair_score)``.
+- **Single bonus**: Among instructions with ``0 < P_i < 0.5``, take the **lowest** ``P_i``;
+  if this response passes i, add ``via_weight * (1 − P_i)``.
 
 Config keys ``gii_weight`` / ``via_weight`` scale pair vs single bonuses.
 
-Per uid group, **GII** and **VIA** are computed and logged as raw ``gii`` / ``via`` per sample.
+When uid grouping yields a valid ``info_matrix``, the **base** reward per rollout is the
+mean over instructions of ``pass_i * (1 + (1 - P_i))`` with ``P_i`` the marginal pass rate
+for instruction ``i`` in that group (config ``weighted_inst_acc_base``, default on).
+
+Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
+``gii`` / ``via`` / ``icr`` per sample.
 """
 
 import os
 import random
-import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -43,137 +47,23 @@ from verl.utils.reward_score import default_compute_score
 from verl.utils.reward_score.ifverify.evaluation import compute_score_internal_batch
 from verl.workers.reward_manager import register
 from verl.workers.reward_manager.abstract import AbstractRewardManager
-
-_LOW_ACC_K = 3
-# (instruction i, instruction j, joint pass rate pair_acc); i < j.
-LowPairAccEntry = tuple[int, int, float]
-# (instruction index, marginal pass rate P_i).
-LowAccEntry = tuple[int, float]
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[: max(0, max_chars - 3)] + "..."
-
-
-def _prompt_gii(info_matrix: np.ndarray) -> float:
-    """GII from K×N binary matrix (K rollouts, N instructions)."""
-    if info_matrix.size == 0:
-        return 0.0
-    k, n = info_matrix.shape
-    if n <= 1:
-        return 0.0
-    counts = info_matrix.sum(axis=0)
-    p_i = counts / k
-    co_matrix = np.zeros((n, n), dtype=np.float32)
-    for i in range(n):
-        if counts[i] == 0:
-            continue
-        for j in range(n):
-            if counts[j] == 0:
-                continue
-            if i == j:
-                co_matrix[i, i] = p_i[i]
-                continue
-            both = np.sum(info_matrix[:, i] * info_matrix[:, j])
-            co_matrix[i, j] = both / counts[j]
-    gii_sum = 0.0
-    for i in range(n):
-        for j in range(n):
-            if i == j:
-                continue
-            gii_sum += co_matrix[i, i] - co_matrix[i, j]
-    return float(gii_sum / (n * (n - 1)))
-
-
-def _prompt_via(info_matrix: np.ndarray) -> float:
-    """Variance of per-instruction pass rates across rollouts (VIA)."""
-    if info_matrix.size == 0:
-        return 0.0
-    k = info_matrix.shape[0]
-    if k == 0:
-        return 0.0
-    pass_rates = info_matrix.sum(axis=0) / k
-    return float(np.var(pass_rates))
-
-
-def _marginal_pass_rates(info_matrix: np.ndarray) -> np.ndarray:
-    """P_i = fraction of rollouts passing instruction i; shape (N,)."""
-    if info_matrix.size == 0:
-        return np.zeros(0, dtype=np.float32)
-    k, _n = info_matrix.shape
-    if k <= 0:
-        return np.zeros(info_matrix.shape[1], dtype=np.float32)
-    return (info_matrix.sum(axis=0) / k).astype(np.float32)
-
-
-def _lowest_pair_acc_mask_and_tuples(
-    info_matrix: np.ndarray, n_inst: int, k: int = _LOW_ACC_K
-) -> tuple[set[tuple[int, int]], tuple[LowPairAccEntry, ...]]:
-    """Lowest joint pass rates (# both pass / K): pair set (i < j) and ranked (i, j, pair_acc).
-
-    Pairs with joint pass rate 0 are excluded. Returns at most ``min(k, #pairs with rate > 0)`` entries.
-    """
-    if info_matrix.size == 0 or n_inst < 2:
-        return set(), ()
-    k_roll = int(info_matrix.shape[0])
-    if k_roll <= 0:
-        return set(), ()
-    scored: list[tuple[float, int, int]] = []
-    for i in range(n_inst):
-        for j in range(i + 1, n_inst):
-            both = float(np.sum(info_matrix[:, i] * info_matrix[:, j]))
-            p_pair = both / k_roll
-            if p_pair <= 0:
-                continue
-            scored.append((p_pair, i, j))
-    scored.sort(key=lambda t: t[0])
-    take = scored[: min(k, len(scored))]
-    ranked = tuple((int(i), int(j), float(p)) for p, i, j in take)
-    pair_set = {(int(i), int(j)) for p, i, j in take}
-    return pair_set, ranked
-
-
-def _lowest_single_acc_mask_and_tuples(
-    p_inst: np.ndarray, n_inst: int, k: int = _LOW_ACC_K
-) -> tuple[set[int], tuple[LowAccEntry, ...]]:
-    """Lowest marginal pass rates P_i among instructions with P_i > 0.
-
-    Returns at most ``min(k, #instructions with P_i > 0)`` entries.
-    """
-    if n_inst <= 0 or p_inst.size == 0:
-        return set(), ()
-    nz = [i for i in range(n_inst) if float(p_inst[i]) > 0]
-    if not nz:
-        return set(), ()
-    nz.sort(key=lambda i: float(p_inst[i]))
-    take_n = min(k, len(nz))
-    order = nz[:take_n]
-    inst_set = set(order)
-    ranked = tuple((int(i), float(p_inst[i])) for i in order)
-    return inst_set, ranked
-
-
-def _pair_single_bonuses_for_row(
-    row: np.ndarray,
-    *,
-    low_pair_ranked: tuple[LowPairAccEntry, ...],
-    low_acc_inst: set[int],
-    p_inst: np.ndarray,
-    n_inst: int,
-    gii_weight: float,
-    via_weight: float,
-) -> tuple[float, float]:
-    pair_bonus = 0.0
-    for i, j, p_pair in low_pair_ranked:
-        if row[i] > 0 and row[j] > 0:
-            pair_bonus += gii_weight * float(1.0 - p_pair)
-    single_bonus = 0.0
-    for i in range(n_inst):
-        if row[i] > 0 and i in low_acc_inst:
-            single_bonus += via_weight * float(1.0 - p_inst[i])
-    return float(pair_bonus), float(single_bonus)
+from verl.workers.reward_manager.ifverify_utils import (
+    LowAccEntry,
+    LowPairAccEntry,
+    _LOW_ACC_ELIGIBLE_MAX,
+    _LOW_ACC_K,
+    _debug_sample_count,
+    _instruction_coverage_rate,
+    _lowest_pair_acc_mask_and_tuples,
+    _lowest_single_acc_mask_and_tuples,
+    _marginal_pass_rates,
+    _pair_single_bonuses_for_row,
+    _prompt_gii,
+    _prompt_via,
+    _truncate,
+    _weighted_instruction_base_reward,
+    _wrap_indent,
+)
 
 
 @dataclass(frozen=True)
@@ -200,21 +90,10 @@ class IfverifyDebugReport:
     info_matrix: np.ndarray | None
     gii: float | None
     via: float | None
+    icr: float | None
     lowest_pair_accs: tuple[LowPairAccEntry, ...] | None
     low_acc_instructions: tuple[LowAccEntry, ...] | None
     rollouts: tuple[IfverifyDebugRollout, ...]
-
-
-def _wrap_indent(text: str, width: int, indent: str) -> str:
-    wrapped = textwrap.fill(
-        text,
-        width=width,
-        break_long_words=True,
-        break_on_hyphens=True,
-        replace_whitespace=False,
-    )
-    lines = wrapped.splitlines() or ["(empty)"]
-    return "\n".join(f"{indent}{ln}" for ln in lines)
 
 
 def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
@@ -249,14 +128,23 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
         k, n_inst = mat.shape
         print(f"  task_id: {tid_s}")
         print(f"  size: K = {k} rollouts × N = {n_inst} instructions  (matrix rows = rollouts)")
-        if report.gii is not None and report.via is not None:
-            print(f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}")
+        if report.gii is not None and report.via is not None and report.icr is not None:
+            print(
+                f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}  ·  "
+                f"icr = {report.icr:.6f}  (instruction coverage rate)"
+            )
         if report.lowest_pair_accs:
-            print("  lowest joint-acc pairs (i, j, pair_acc) — pair bonus when both pass:")
+            print(
+                f"  lowest pair score pairs (i, j, both/min; 0 < score < {_LOW_ACC_ELIGIBLE_MAX}) "
+                f"— pair bonus when both pass:"
+            )
             for rank, (i, j, p_pair) in enumerate(report.lowest_pair_accs, start=1):
-                print(f"    #{rank}  (i={i}, j={j})  pair_acc = {p_pair:.6f}")
+                print(f"    #{rank}  (i={i}, j={j})  pair_score = {p_pair:.6f}")
         if report.low_acc_instructions:
-            print("  lowest-acc instructions (idx, P_i) — single bonus when that idx passes:")
+            print(
+                f"  lowest-acc instructions (idx, P_i; 0 < P_i < {_LOW_ACC_ELIGIBLE_MAX}) "
+                f"— single bonus when idx passes:"
+            )
             for rank, (inst_i, p_i) in enumerate(report.low_acc_instructions, start=1):
                 print(f"    #{rank}  instruction {inst_i}  P = {p_i:.6f}")
     else:
@@ -317,14 +205,6 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
     print()
 
 
-def _debug_sample_count() -> int:
-    raw = os.environ.get("DEBUG_SAMPLES", "3")
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return 3
-
-
 def _make_debug_rollouts(
     *,
     spotlight_idx: int,
@@ -381,13 +261,17 @@ def _make_debug_rollouts(
 
 @register("ifverify_sg_score")
 class IfverifySgScoreRewardManager(AbstractRewardManager):
-    """IFVerify group rewards: low joint-acc pair bonus and low marginal-acc single bonus.
+    """IFVerify group rewards: bonuses on eligible low-acc pairs and singles (see module).
 
-    Groups by ``uid``; builds K×N from ``follow_instruction_list``, then adds per-response
-    bonuses: (a) ``gii_weight`` scales ``(1 − pair_acc)`` for up to three pairs with lowest
-    positive joint pass rate when both pass; (b) ``via_weight`` scales ``(1 − P_i)`` for up
-    to three lowest positive single-instruction pass rates when that instruction passes.
-    Also logs **GII** and **VIA** per group for monitoring.
+    Groups by ``uid``; builds K×N from ``follow_instruction_list``. **Base reward** for each
+    rollout uses instruction-acc-dependent weights when grouping is valid: fulfilling
+    instruction ``i`` contributes ``1 + (1 − P_i)`` with ``P_i`` the marginal pass rate in
+    the group (equal to unweighted ``1/N`` sum when all ``P_i = 1``). Pair/single bonuses
+    use ``ifverify_utils`` selection: (a) ``gii_weight`` scales ``(1 − pair_score)``
+    for selected pairs (lowest ``both/min`` among ``0 < score < 0.5``) when both pass;
+    (b) ``via_weight`` scales ``(1 − P_i)`` for selected singles (lowest ``P_i`` among
+    ``0 < P_i < 0.5``) when that instruction passes.
+    Also logs **GII**, **VIA**, and **ICR** per group for monitoring.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
     """
@@ -400,6 +284,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         reward_fn_key: str = "data_source",
         gii_weight: float = 0.1,
         via_weight: float = 0.1,
+        weighted_inst_base_score: bool = False,
         **kwargs: Any,
     ) -> None:
         self.tokenizer = tokenizer
@@ -408,6 +293,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         self.reward_fn_key = reward_fn_key
         self.gii_weight = float(gii_weight)
         self.via_weight = float(via_weight)
+        self.weighted_inst_base_score = bool(weighted_inst_base_score)
         _ = kwargs
 
     def __call__(self, data: DataProto, return_dict: bool = False) -> torch.Tensor | dict[str, Any]:
@@ -497,6 +383,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         reward_extra_info["prompt_acc"] = [0.0] * n_items
         reward_extra_info["gii"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
+        reward_extra_info["icr"] = [0.0] * n_items
         info_matrix_per_idx: list[np.ndarray | None] = [None] * n_items
         lowest_pair_accs_per_idx: list[tuple[LowPairAccEntry, ...] | None] = [None] * n_items
         low_acc_instructions_per_idx: list[tuple[LowAccEntry, ...] | None] = [None] * n_items
@@ -527,9 +414,11 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     info_matrix = np.array(rows, dtype=np.float32)
                     gii = _prompt_gii(info_matrix)
                     via = _prompt_via(info_matrix)
+                    icr = _instruction_coverage_rate(info_matrix)
                     for idx in indices:
                         reward_extra_info["gii"][idx] = gii
                         reward_extra_info["via"][idx] = via
+                        reward_extra_info["icr"][idx] = icr
                     p_inst = _marginal_pass_rates(info_matrix)
                     _, low_pair_ranked = _lowest_pair_acc_mask_and_tuples(
                         info_matrix, n_inst, k=_LOW_ACC_K
@@ -557,7 +446,13 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                         reward_extra_info["single_bonus"][idx] = sb
                         reward_extra_info["prompt_extra_bonus"][idx] = pb + sb
                         pos = last_reward_pos[idx]
-                        reward_tensor[idx, pos] += np.float32(pb + sb)
+                        row = info_matrix[g]
+                        if self.weighted_inst_base_score and n_inst > 0:
+                            w_base = _weighted_instruction_base_reward(row, p_inst)
+                            reward_tensor[idx, pos] = np.float32(w_base + pb + sb)
+                            reward_extra_info["instruction_acc"][idx] = float(w_base)
+                        else:
+                            reward_tensor[idx, pos] += np.float32(pb + sb)
 
         n_debug = _debug_sample_count()
         if n_items > 0 and n_debug > 0:
@@ -585,6 +480,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     info_matrix=mat,
                     gii=float(reward_extra_info["gii"][idx]) if has_metrics else None,
                     via=float(reward_extra_info["via"][idx]) if has_metrics else None,
+                    icr=float(reward_extra_info["icr"][idx]) if has_metrics else None,
                     lowest_pair_accs=lowest_pair_accs_per_idx[idx] if has_metrics else None,
                     low_acc_instructions=low_acc_instructions_per_idx[idx] if has_metrics else None,
                     rollouts=tuple(rollouts_list),
