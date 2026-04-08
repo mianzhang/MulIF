@@ -449,10 +449,10 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                         row = info_matrix[g]
                         if self.weighted_inst_base_score and n_inst > 0:
                             w_base = _weighted_instruction_base_reward(row, p_inst)
-                            reward_tensor[idx, pos] = np.float32(w_base + pb + sb)
+                            reward_tensor[idx, pos] = float(w_base + pb + sb)
                             reward_extra_info["instruction_acc"][idx] = float(w_base)
                         else:
-                            reward_tensor[idx, pos] += np.float32(pb + sb)
+                            reward_tensor[idx, pos] += float(pb + sb)
 
         n_debug = _debug_sample_count()
         if n_items > 0 and n_debug > 0:
