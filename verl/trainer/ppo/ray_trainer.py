@@ -180,6 +180,35 @@ def compute_response_mask(data: DataProto):
     return attention_mask[:, -response_length:]
 
 
+# def _apply_grpo_focal_adv_bonuses(
+#     data: DataProto,
+#     advantages: torch.Tensor,
+#     returns: torch.Tensor,
+#     focal_coef: float,
+# ) -> tuple[torch.Tensor, torch.Tensor]:
+#     """Add IFVerify-style single-instruction (VIA) focal bonus to GRPO advantages after group normalization.
+
+#     Expects ``single_bonus`` per sequence in ``data.non_tensor_batch`` (same length as batch).
+#     """
+#     if focal_coef == 0.0:
+#         return advantages, returns
+#     sb = data.non_tensor_batch.get("single_bonus")
+#     if sb is None:
+#         return advantages, returns
+#     device = advantages.device
+#     sb_t = torch.as_tensor(np.asarray(sb, dtype=np.float32), device=device)
+#     bsz = advantages.shape[0]
+#     if sb_t.shape[0] != bsz:
+#         return advantages, returns
+#     focal = focal_coef * sb_t
+#     mask = data.batch["response_mask"]
+#     extra = focal.unsqueeze(-1) * mask
+#     advantages = advantages + extra
+#     # GRPO returns match advantages (see ``compute_grpo_outcome_advantage``); keep aligned after add.
+#     returns = returns + extra
+#     return advantages, returns
+
+
 def compute_advantage(
     data: DataProto,
     adv_estimator: AdvantageEstimator,
@@ -202,7 +231,9 @@ def compute_advantage(
         num_repeat (int, optional): Number of times to repeat the computation. Defaults to 1.
         norm_adv_by_std_in_grpo (bool, optional): Whether to normalize advantages by standard deviation in
             GRPO. Defaults to True.
-        config (dict, optional): Configuration dictionary for algorithm settings. Defaults to None.
+        config (dict, optional): Algorithm settings. For GRPO, an optional ``grpo_focal_adv_coef`` (e.g.
+            Hydra ``+algorithm.grpo_focal_adv_coef=...``) adds scaled ``single_bonus`` to advantages after
+            normalization. Defaults to None.
 
     Returns:
         DataProto: The updated data with computed advantages and returns.
@@ -239,6 +270,10 @@ def compute_advantage(
             index=data.non_tensor_batch["uid"],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
         )
+        # focal_coef = 0.0
+        # if config is not None:
+        #     focal_coef = float(config.get("grpo_focal_adv_coef", 0.0))
+        # advantages, returns = _apply_grpo_focal_adv_bonuses(data, advantages, returns, focal_coef)
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
     else:

@@ -26,8 +26,9 @@ Selection matches ``ifverify_utils`` (same as ``ifverify_sg_rank`` / ``ifverify_
 Config keys ``gii_weight`` / ``via_weight`` scale pair vs single bonuses.
 
 When uid grouping yields a valid ``info_matrix``, the **base** reward per rollout is the
-mean over instructions of ``pass_i * (1 + (1 - P_i))`` with ``P_i`` the marginal pass rate
-for instruction ``i`` in that group (config ``weighted_inst_acc_base``, default on).
+mean over instructions of ``pass_i * (1 + (1 - P_i)^gamma)`` with ``P_i`` the marginal pass
+rate for instruction ``i`` in that group (config ``weighted_inst_base_score``, gamma via
+``weighted_inst_base_gamma``).
 
 Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
 ``gii`` / ``via`` / ``icr`` per sample.
@@ -265,8 +266,8 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
 
     Groups by ``uid``; builds K×N from ``follow_instruction_list``. **Base reward** for each
     rollout uses instruction-acc-dependent weights when grouping is valid: fulfilling
-    instruction ``i`` contributes ``1 + (1 − P_i)`` with ``P_i`` the marginal pass rate in
-    the group (equal to unweighted ``1/N`` sum when all ``P_i = 1``). Pair/single bonuses
+    instruction ``i`` contributes ``1 + (1 − P_i)^gamma`` with ``P_i`` the marginal pass
+    rate in the group (equal to unweighted ``1/N`` sum when all ``P_i = 1``). Pair/single bonuses
     use ``ifverify_utils`` selection: (a) ``gii_weight`` scales ``(1 − pair_score)``
     for selected pairs (lowest ``both/min`` among ``0 < score < 0.5``) when both pass;
     (b) ``via_weight`` scales ``(1 − P_i)`` for selected singles (lowest ``P_i`` among
@@ -282,9 +283,10 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         num_examine: int,
         compute_score: Any = None,
         reward_fn_key: str = "data_source",
-        gii_weight: float = 0.1,
-        via_weight: float = 0.1,
+        gii_weight: float = 0.0,
+        via_weight: float = 0.0,
         weighted_inst_base_score: bool = False,
+        focal_gamma: float = 1.0,
         **kwargs: Any,
     ) -> None:
         self.tokenizer = tokenizer
@@ -294,6 +296,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         self.gii_weight = float(gii_weight)
         self.via_weight = float(via_weight)
         self.weighted_inst_base_score = bool(weighted_inst_base_score)
+        self.focal_gamma = float(focal_gamma)
         _ = kwargs
 
     def __call__(self, data: DataProto, return_dict: bool = False) -> torch.Tensor | dict[str, Any]:
@@ -438,9 +441,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                             low_pair_ranked=low_pair_ranked,
                             low_acc_inst=low_acc_inst,
                             p_inst=p_inst,
-                            n_inst=n_inst,
-                            gii_weight=self.gii_weight,
-                            via_weight=self.via_weight,
+                            n_inst=n_inst
                         )
                         reward_extra_info["pair_bonus"][idx] = pb
                         reward_extra_info["single_bonus"][idx] = sb
@@ -448,11 +449,10 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                         pos = last_reward_pos[idx]
                         row = info_matrix[g]
                         if self.weighted_inst_base_score and n_inst > 0:
-                            w_base = _weighted_instruction_base_reward(row, p_inst)
-                            reward_tensor[idx, pos] = float(w_base + pb + sb)
-                            reward_extra_info["instruction_acc"][idx] = float(w_base)
-                        else:
-                            reward_tensor[idx, pos] += float(pb + sb)
+                            w_base = _weighted_instruction_base_reward(
+                                row, p_inst, gamma=self.focal_gamma
+                            )
+                            reward_tensor[idx, pos] = float(w_base)
 
         n_debug = _debug_sample_count()
         if n_items > 0 and n_debug > 0:

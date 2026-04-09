@@ -19,7 +19,7 @@ import textwrap
 
 import numpy as np
 
-_LOW_ACC_K = 1
+_LOW_ACC_K = 5
 # Singles: 0 < P_i < this. Pairs: 0 < pair_score < this (both ends exclusive below this cap).
 # Used by ifverify_sg_rank, ifverify_bg, and ifverify_sg_score for lowest-pair / lowest-single selection.
 _LOW_ACC_ELIGIBLE_MAX = 0.5
@@ -102,14 +102,18 @@ def _marginal_pass_rates(info_matrix: np.ndarray) -> np.ndarray:
     return (info_matrix.sum(axis=0) / k).astype(np.float32)
 
 
-def _weighted_instruction_base_reward(row: np.ndarray, p_inst: np.ndarray) -> float:
+def _weighted_instruction_base_reward(
+    row: np.ndarray, p_inst: np.ndarray, gamma: float = 1.0
+) -> float:
     """Per-response base reward with instruction-acc-dependent weights.
 
     For each instruction ``i``, marginal pass rate ``P_i`` (instruction acc in the group)
-    defines weight ``1 + (1 - P_i) = 2 - P_i`` when that instruction is satisfied.
-    Returns the mean over instructions: ``(1/N) * sum_i row_i * (2 - P_i)``.
+    defines focal-style weight ``1 + (1 - P_i)^gamma`` when that instruction is satisfied.
+    Returns the mean over instructions:
+    ``(1/N) * sum_i row_i * (1 + (1 - P_i)^gamma)``.
 
-    When all ``P_i == 1``, this equals the unweighted fulfilled fraction ``mean(row)``.
+    When all ``P_i == 1``, this equals the unweighted fulfilled fraction ``mean(row)``
+    for any ``gamma > 0``.
     """
     if row.size == 0 or p_inst.size == 0:
         return 0.0
@@ -118,7 +122,8 @@ def _weighted_instruction_base_reward(row: np.ndarray, p_inst: np.ndarray) -> fl
         return float(np.mean(row))
     rw = row.astype(np.float64)
     p = p_inst.astype(np.float64)
-    return float(np.sum(rw * (2.0 - p)) / n)
+    g = float(gamma)
+    return float(np.sum(rw * (1.0 + np.power(1.0 - p, g))) / n)
 
 
 def _lowest_pair_acc_mask_and_tuples(
@@ -188,17 +193,15 @@ def _pair_single_bonuses_for_row(
     low_acc_inst: set[int],
     p_inst: np.ndarray,
     n_inst: int,
-    gii_weight: float,
-    via_weight: float,
 ) -> tuple[float, float]:
     pair_bonus = 0.0
     for i, j, p_pair in low_pair_ranked:
         if row[i] > 0 and row[j] > 0:
-            pair_bonus += gii_weight * float(1.0 - p_pair)
+            pair_bonus += float(1.0 - p_pair)
     single_bonus = 0.0
     for i in range(n_inst):
         if row[i] > 0 and i in low_acc_inst:
-            single_bonus += via_weight * float(1.0 - p_inst[i])
+            single_bonus += float(1.0 - p_inst[i])
     return float(pair_bonus), float(single_bonus)
 
 

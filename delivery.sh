@@ -1,0 +1,1 @@
+python hf_upload.py checkpoints/MulIF/sg_baseline_rule_qwen17b/global_step_125/actor/ --repo-id billmianz/sg_baseline_rule_qwen17b_step125 --repo-type model
