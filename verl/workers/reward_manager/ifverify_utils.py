@@ -21,7 +21,7 @@ import numpy as np
 
 _LOW_ACC_K = 5
 # Singles: 0 < P_i < this. Pairs: 0 < pair_score < this (both ends exclusive below this cap).
-# Used by ifverify_sg_rank, ifverify_bg, and ifverify_sg_score for lowest-pair / lowest-single selection.
+# Used by ifverify_sg_rank and ifverify_bg for lowest-pair / lowest-single selection.
 _LOW_ACC_ELIGIBLE_MAX = 0.5
 
 # (instruction i, instruction j, pair score); i < j.
@@ -104,26 +104,29 @@ def _marginal_pass_rates(info_matrix: np.ndarray) -> np.ndarray:
 
 def _weighted_instruction_base_reward(
     row: np.ndarray, p_inst: np.ndarray, gamma: float = 1.0
-) -> float:
-    """Per-response base reward with instruction-acc-dependent weights.
+) -> tuple[float, float]:
+    """Per-response weighted base and exploration means from one pass over instructions.
 
-    For each instruction ``i``, marginal pass rate ``P_i`` (instruction acc in the group)
-    defines focal-style weight ``1 + (1 - P_i)^gamma`` when that instruction is satisfied.
-    Returns the mean over instructions:
-    ``(1/N) * sum_i row_i * (1 + (1 - P_i)^gamma)``.
+    Let ``e_i = (1 - P_i)^gamma``. Returns:
 
-    When all ``P_i == 1``, this equals the unweighted fulfilled fraction ``mean(row)``
-    for any ``gamma > 0``.
+    - **Base** (mean): ``(1/N) * sum_i row_i * (1 + e_i)`` — same as ``mean(row) + exploration``.
+    - **Exploration** (mean): ``(1/N) * sum_i row_i * e_i``.
+
+    When ``row`` and ``p_inst`` lengths differ, base falls back to ``mean(row)`` and
+    exploration is ``0.0``. When all ``P_i == 1``, ``e_i = 0`` and base equals ``mean(row)``.
     """
     if row.size == 0 or p_inst.size == 0:
-        return 0.0
+        return (0.0, 0.0)
     n = int(row.shape[0])
     if n != int(p_inst.shape[0]):
-        return float(np.mean(row))
+        return (float(np.mean(row)), 0.0)
     rw = row.astype(np.float64)
     p = p_inst.astype(np.float64)
     g = float(gamma)
-    return float(np.sum(rw * (1.0 + np.power(1.0 - p, g))) / n)
+    e = np.power(1.0 - p, g)
+    exploration = float(np.sum(rw * e) / n)
+    weighted_base = float(np.sum(rw * (1.0 + e)) / n)
+    return (weighted_base, exploration)
 
 
 def _lowest_pair_acc_mask_and_tuples(

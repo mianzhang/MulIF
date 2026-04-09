@@ -8,18 +8,18 @@ if [ -n "$AZURE_STORAGE_ROOT" ]; then
     DEFAULT_HF_HOME="$AZURE_STORAGE_ROOT/hf_home"
     DEFAULT_HF_CACHE_DIR="$AZURE_STORAGE_ROOT/hf_cache"
     DEFAULT_DATA_DIR="$AZURE_STORAGE_ROOT/verl_data"
-    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/sg_wbase3_rule_qwen17b_ckpt125"
+    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/sg_wbase1_rule_qwen17b_ckpt125"
     DEFAULT_WANDB_DIR="$AZURE_STORAGE_ROOT/wandb"
-    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/sg_wbase3_rule_qwen17b_ckpt125"
-    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/sg_wbase3_rule_qwen17b_ckpt125"
+    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/sg_wbase1_rule_qwen17b_ckpt125"
+    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/sg_wbase1_rule_qwen17b_ckpt125"
 else
     DEFAULT_HF_HOME="$ROOT_DIR/.hf_home"
     DEFAULT_HF_CACHE_DIR="$ROOT_DIR/hf_cache"
     DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
     DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
     DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
-    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/sg_wbase3_rule_qwen17b_ckpt125"
-    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/sg_wbase3_rule_qwen17b_ckpt125"
+    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/sg_wbase1_rule_qwen17b_ckpt125"
+    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/sg_wbase1_rule_qwen17b_ckpt125"
 fi
 
 export HF_HOME=${HF_HOME:-$DEFAULT_HF_HOME}
@@ -76,11 +76,11 @@ python3 -m verl.trainer.main_ppo \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
     +reward_model.reward_kwargs.weighted_inst_base_score=True \
-    +reward_model.reward_kwargs.focal_gamma=3.0 \
+    +reward_model.reward_kwargs.focal_gamma=1.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='sg_wbase3_rule_qwen17b_ckpt125' \
+    trainer.experiment_name='sg_wbase1_rule_qwen17b_ckpt125' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.default_local_dir=$CKPT_DIR \
@@ -92,6 +92,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=150 > "$RUN_LOG_DIR/sg_wbase3_rule_qwen17b_ckpt125.log"
+    trainer.total_training_steps=150 > "$RUN_LOG_DIR/sg_wbase1_rule_qwen17b_ckpt125.log"
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

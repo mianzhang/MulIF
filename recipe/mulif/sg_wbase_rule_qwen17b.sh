@@ -47,8 +47,6 @@ python3 -m verl.trainer.main_ppo \
     algorithm.norm_adv_by_std_in_grpo=True \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
-    +reward_model.reward_kwargs.gii_weight=0.0 \
-    +reward_model.reward_kwargs.via_weight=0.0 \
     +reward_model.reward_kwargs.weighted_inst_base_score=True \
     +reward_model.reward_kwargs.focal_gamma=3.0 \
     trainer.critic_warmup=0.0 \
