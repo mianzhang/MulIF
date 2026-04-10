@@ -31,7 +31,7 @@ export CKPT_DIR=${CKPT_DIR:-$DEFAULT_CKPT_DIR}
 export PROFILE_DIR=${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 n_gpus_per_node=8
-MODEL_PATH=$HF_CACHE_DIR/sg_baseline_rule_qwen17b_step125
+MODEL_PATH=$HF_CACHE_DIR/billmianz/sg_baseline_rule_qwen17b_step125
 mkdir -p "$RUN_LOG_DIR" "$WANDB_DIR" "$HF_HOME" "$HF_CACHE_DIR" "$DATA_DIR" "$CKPT_DIR" "$PROFILE_DIR"
 export OPENAI_RUBRIC_MODEL=gpt-5.4-mini
 export REWARDS_SCORE_MAX_WORKERS=64
