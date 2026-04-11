@@ -86,7 +86,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.default_local_dir=$CKPT_DIR \
     global_profiler.save_path=$PROFILE_DIR \
-    trainer.save_freq=25 \
+    trainer.save_freq=10 \
     trainer.val_before_train=True \
     trainer.val_only=False \
     trainer.resume_mode=auto \
