@@ -77,7 +77,7 @@ python3 -m verl.trainer.main_ppo \
     reward_model.launch_reward_fn_async=False \
     +reward_model.reward_kwargs.gii_weight=0.0 \
     +reward_model.reward_kwargs.via_weight=0.0 \
-    +reward_model.reward_kwargs.weighted_inst_base_score=True \
+    +reward_model.reward_kwargs.inst_weight_mode=linear \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \

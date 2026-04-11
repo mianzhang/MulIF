@@ -4,8 +4,109 @@ from __future__ import annotations
 
 from . import instructions
 
+_PARAGRAPH = "paragraphs:"
+
+_KEYWORD = "keywords:"
+
+_LETTER = "letters:"
+
+_LANGUAGE = "language:"
+
+_LENGTH = "length_constraints:"
+
+_CONTENT = "detectable_content:"
+
+_FORMAT = "detectable_format:"
+
+_MULTITURN = "multi-turn:"
+
+_COMBINATION = "combination:"
+
+_STARTEND = "startend:"
+
+_CHANGE_CASES = "change_case:"
+
+_PUNCTUATION = "punctuation:"
+
+_NEW = "new:"
+
+_COPY = "copy:"
+
+_BASIC = "basic:"
+
+_FIRSTWORD = "first_word:"
+
+_LASTWORD = "last_word:"
+
+_COUNT = "count:"
+
 
 INSTRUCTION_DICT = {
+    # IFTrain Constraints (IFEval)
+    _KEYWORD + "existence": instructions.KeywordChecker,
+    _KEYWORD + "frequency": instructions.KeywordFrequencyChecker,
+    # TODO(jeffreyzhou): make a proper set of sentences to choose from
+    # _KEYWORD + "key_sentences": instructions.KeySentenceChecker,
+    _KEYWORD + "forbidden_words": instructions.ForbiddenWords,
+    _KEYWORD + "letter_frequency": instructions.LetterFrequencyChecker,
+    _LANGUAGE + "response_language": instructions.ResponseLanguageChecker,
+    _LENGTH + "number_sentences": instructions.NumberOfSentences,
+    _LENGTH + "number_paragraphs": instructions.ParagraphChecker,
+    _LENGTH + "number_words": instructions.NumberOfWords,
+    _LENGTH + "nth_paragraph_first_word": instructions.ParagraphFirstWordCheck,
+    _CONTENT + "number_placeholders": instructions.PlaceholderChecker,
+    _CONTENT + "postscript": instructions.PostscriptChecker,
+    _FORMAT + "number_bullet_lists": instructions.BulletListChecker,
+    # TODO(jeffreyzhou): Pre-create paragraph or use prompt to replace
+    # _CONTENT + "rephrase_paragraph": instructions.RephraseParagraph,
+    _FORMAT + "constrained_response": instructions.ConstrainedResponseChecker,
+    _FORMAT + "number_highlighted_sections": (instructions.HighlightSectionChecker),
+    _FORMAT + "multiple_sections": instructions.SectionChecker,
+    # TODO(tianjianlu): Re-enable rephrasing with preprocessing the message.
+    # _FORMAT + "rephrase": instructions.RephraseChecker,
+    _FORMAT + "json_format": instructions.JsonFormat,
+    _FORMAT + "title": instructions.TitleChecker,
+    # TODO(tianjianlu): Re-enable with specific prompts.
+    # _MULTITURN + "constrained_start": instructions.ConstrainedStartChecker,
+    _COMBINATION + "two_responses": instructions.TwoResponsesChecker,
+    _COMBINATION + "repeat_prompt": instructions.RepeatPromptThenAnswer,
+    _STARTEND + "end_checker": instructions.EndChecker,
+    _CHANGE_CASES + "capital_word_frequency": instructions.CapitalWordFrequencyChecker,
+    _CHANGE_CASES + "english_capital": instructions.CapitalLettersEnglishChecker,
+    _CHANGE_CASES + "english_lowercase": instructions.LowercaseLettersEnglishChecker,
+    _PUNCTUATION + "no_comma": instructions.CommaChecker,
+    _STARTEND + "quotation": instructions.QuotationChecker,
+    # IFTrain Constraints: New Constraints!
+    _COPY + "repeat_phrase": instructions.RepeatPhraseChecker,
+    _COPY + "copy": instructions.CopyChecker,
+    _NEW + "copy_span_idx": instructions.CopySpanIdxChecker,
+    _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
+    _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
+    _FORMAT + "square_brackets": instructions.SquareBracketChecker,
+    _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
+    _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
+    _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
+    _PARAGRAPH + "paragraphs": instructions.ParagraphBasicChecker,
+    _PARAGRAPH + "paragraphs2": instructions.ParagraphBasicChecker2,
+    _FIRSTWORD + "first_word_sent": instructions.FirstWordSentChecker,
+    _FIRSTWORD + "first_word_answer": instructions.FirstWordAnswerChecker,
+    _LASTWORD + "last_word_sent": instructions.LastWordSentChecker,
+    _LASTWORD + "last_word_answer": instructions.LastWordAnswerChecker,
+    _FORMAT + "bigram_wrapping": instructions.BiGramWrappingChecker,
+    _COPY + "copying_simple": instructions.CopyingSimpleChecker,
+    _COPY + "copying_multiple": instructions.CopyingMultipleChecker,
+    _PUNCTUATION + "punctuation_dot": instructions.PunctuationDotChecker,
+    _PUNCTUATION + "punctuation_exclamation": instructions.PunctuationExclamationChecker,
+    _COUNT + "lowercase_counting": instructions.LowercaseCountingChecker,
+    _LETTER + "letter_counting": instructions.LetterCountingChecker,
+    _LETTER + "letter_counting2": instructions.LetterFrequencyChecker,
+    _COUNT + "counting_composition": instructions.CountingCompositionChecker,
+    _COUNT + "count_unique": instructions.CountUniqueChecker,
+    _COUNT + "count_increment_word": instructions.CountIncrementWordChecker,
+    _KEYWORD + "palindrome": instructions.PalindromeBasicChecker,
+    _KEYWORD + "keyword_specific_position": instructions.KeywordSpecificPositionChecker,
+    _KEYWORD + "start_end": instructions.StartEndChecker,
+    # IFBench Instructions (rule)
     "count:word_count_range": instructions.WordCountRangeChecker,
     "count:unique_word_count": instructions.UniqueWordCountChecker,
     "ratio:stop_words": instructions.StopWordPercentageChecker,
@@ -64,7 +165,9 @@ INSTRUCTION_DICT = {
     "format:title_case": instructions.TitleCaseChecker,
     "format:output_template": instructions.OutputTemplateChecker,
     "format:no_whitespace": instructions.NoWhitespaceChecker,
+    # Rubric Instructions (llm)
     "rubric:llm": instructions.RubricLLMChecker,
+    # Rubric Instructions (rule)
     "recast:word_length": instructions.RecastWordLengthChecker,
     "recast:sentence_length": instructions.RecastSentenceLengthChecker,
     "recast:keyword": instructions.RecastKeywordChecker,

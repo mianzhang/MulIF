@@ -1,18 +1,18 @@
 
 
 export $(grep -v '^#' .env | xargs)
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-n_gpus_per_node=4
+export CUDA_VISIBLE_DEVICES=2,3
+n_gpus_per_node=2
 MODEL_PATH=$HF_CACHE_DIR/Qwen3-1.7B
 export OPENAI_RUBRIC_MODEL=gpt-5.4-mini
 export REWARDS_SCORE_MAX_WORKERS=64
-export DEBUG_SAMPLES=20
+export DEBUG_SAMPLES=10
 
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$ROOT_DIR/verl_data/RECAST_train_3c_12c_rule.parquet \
-    data.val_files="[$ROOT_DIR/verl_data/RECAST_c5.parquet, $ROOT_DIR/verl_data/RECAST_c10.parquet, $ROOT_DIR/verl_data/AdvancedIF.parquet, $ROOT_DIR/verl_data/IFBench.parquet]" \
+    data.train_files=$ROOT_DIR/verl_data/IFTrain_3c_5c.parquet \
+    data.val_files="[$ROOT_DIR/verl_data/RECAST_c5.parquet, $ROOT_DIR/verl_data/AdvancedIF.parquet, $ROOT_DIR/verl_data/IFBench.parquet]" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=1024 \
@@ -23,7 +23,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=32\
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -44,14 +44,15 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     actor_rollout_ref.ref.strategy=fsdp2 \
     algorithm.use_kl_in_reward=False \
+    algorithm.norm_adv_by_std_in_grpo=True \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
-    +reward_model.reward_kwargs.gii_weight=0.0 \
-    +reward_model.reward_kwargs.via_weight=0.0 \
+    +reward_model.reward_kwargs.inst_weight_mode=exp \
+    +reward_model.reward_kwargs.focal_exp_lambda=1.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='sg_baseline_rule_qwen17b' \
+    trainer.experiment_name='sg_wbase_exp_lambda1_IFTrain_qwen17b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.save_freq=25 \
@@ -61,6 +62,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=200 > log/sg_baseline_rule_qwen17b.log
+    trainer.total_training_steps=500 > log/sg_wbase_exp_lambda1_IFTrain_qwen17b.log
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

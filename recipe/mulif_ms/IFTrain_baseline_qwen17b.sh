@@ -8,18 +8,18 @@ if [ -n "$AZURE_STORAGE_ROOT" ]; then
     DEFAULT_HF_HOME="$AZURE_STORAGE_ROOT/hf_home"
     DEFAULT_HF_CACHE_DIR="$AZURE_STORAGE_ROOT/hf_cache"
     DEFAULT_DATA_DIR="$AZURE_STORAGE_ROOT/verl_data"
-    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/sg_baseline_rule_qwen17b_ckpt125"
+    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/IFTrain_baseline_qwen17b"
     DEFAULT_WANDB_DIR="$AZURE_STORAGE_ROOT/wandb"
-    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/sg_baseline_rule_qwen17b_ckpt125"
-    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/sg_baseline_rule_qwen17b_ckpt125"
+    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/IFTrain_baseline_qwen17b"
+    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/IFTrain_baseline_qwen17b"
 else
     DEFAULT_HF_HOME="$ROOT_DIR/.hf_home"
     DEFAULT_HF_CACHE_DIR="$ROOT_DIR/hf_cache"
     DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
     DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
     DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
-    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/sg_baseline_rule_qwen17b_ckpt125"
-    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/sg_baseline_rule_qwen17b_ckpt125"
+    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/IFTrain_baseline_qwen17b"
+    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/IFTrain_baseline_qwen17b"
 fi
 
 export HF_HOME=${HF_HOME:-$DEFAULT_HF_HOME}
@@ -31,16 +31,16 @@ export CKPT_DIR=${CKPT_DIR:-$DEFAULT_CKPT_DIR}
 export PROFILE_DIR=${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 n_gpus_per_node=8
-MODEL_PATH=$HF_CACHE_DIR/billmianz/sg_baseline_rule_qwen17b_step125
+MODEL_PATH=$HF_CACHE_DIR/Qwen/Qwen3-1.7B
 mkdir -p "$RUN_LOG_DIR" "$WANDB_DIR" "$HF_HOME" "$HF_CACHE_DIR" "$DATA_DIR" "$CKPT_DIR" "$PROFILE_DIR"
 export OPENAI_RUBRIC_MODEL=gpt-5.4-mini
 export REWARDS_SCORE_MAX_WORKERS=64
-export DEBUG_SAMPLES=20
+export DEBUG_SAMPLES=10
 
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$DATA_DIR/RECAST_train_3c_12c_rule.parquet \
+    data.train_files=$DATA_DIR/IFTrain_3c_5c.parquet \
     data.val_files="[$DATA_DIR/RECAST_c5.parquet, $DATA_DIR/RECAST_c10.parquet, $DATA_DIR/AdvancedIF.parquet, $DATA_DIR/IFBench.parquet]" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
@@ -75,23 +75,24 @@ python3 -m verl.trainer.main_ppo \
     algorithm.use_kl_in_reward=False \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
-    +reward_model.reward_kwargs.gii_weight=0.0 \
-    +reward_model.reward_kwargs.via_weight=0.0 \
+    +reward_model.reward_kwargs.inst_weight_mode=none \
+    +reward_model.reward_kwargs.focal_gamma=1.0 \
+    +reward_model.reward_kwargs.focal_exp_lambda=1.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='sg_baseline_rule_qwen17b_ckpt125' \
+    trainer.experiment_name='IFTrain_baseline_qwen17b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.default_local_dir=$CKPT_DIR \
     global_profiler.save_path=$PROFILE_DIR \
-    trainer.save_freq=10 \
+    trainer.save_freq=25 \
     trainer.val_before_train=True \
     trainer.val_only=False \
     trainer.resume_mode=auto \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=150 > "$RUN_LOG_DIR/sg_baseline_rule_qwen17b_ckpt125.log"
+    trainer.total_training_steps=500 > "$RUN_LOG_DIR/IFTrain_baseline_qwen17b.log"
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

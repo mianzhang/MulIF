@@ -75,7 +75,7 @@ python3 -m verl.trainer.main_ppo \
     algorithm.use_kl_in_reward=False \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
-    +reward_model.reward_kwargs.weighted_inst_base_score=True \
+    +reward_model.reward_kwargs.inst_weight_mode=linear \
     +reward_model.reward_kwargs.focal_gamma=3.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \

@@ -2,3 +2,4 @@
 
 from .ifbench_instructions_util import *  # noqa: F403
 from .recast_instructions_util import *  # noqa: F403
+from .iftrain_instructions_util import *  # noqa: F403

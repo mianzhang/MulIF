@@ -14,14 +14,18 @@
 
 """Reward manager for IFVerify groups with a K×N binary ``info_matrix`` (K rollouts, N instructions).
 
-When uid grouping yields a valid ``info_matrix`` and ``weighted_inst_base_score`` is enabled,
-the **base** reward per rollout is the mean over instructions of
-``pass_i * (1 + (1 - P_i)^gamma)``, where ``P_i`` is the marginal pass rate for instruction
-``i`` in that group and ``(1 - P_i)^gamma`` is the **exploration** component per fulfilled
-instruction. Config: ``weighted_inst_base_score``, ``focal_gamma`` (γ).
+When uid grouping yields a valid ``info_matrix``, ``inst_weight_mode`` selects how the tensor
+reward is set from per-instruction passes (marginals ``P_i`` from the group):
 
-``exploration_reward`` per sample (mean over instructions of ``pass_i * (1 - P_i)^gamma``) is
-logged in ``reward_extra_info`` only when ``weighted_inst_base_score`` is enabled.
+- **none** (default): use the verifier score mean only (no exploration weighting).
+- **linear**: ``pass_i * (1 + (1 - P_i)^gamma)``; exploration term ``(1 - P_i)^gamma``.
+- **exp**: ``pass_i * exp(focal_exp_lambda * (1 - P_i))``; exploration is the excess vs. unit
+  weights, ``pass_i * (W_i - 1)`` with ``W_i = exp(λ(1 - P_i))``.
+
+Config: ``inst_weight_mode``, ``focal_gamma`` (γ, linear only), ``focal_exp_lambda`` (λ, exp only).
+
+``exploration_reward`` is logged in ``reward_extra_info`` when ``inst_weight_mode`` is
+``linear`` or ``exp``.
 
 Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
 ``gii`` / ``via`` / ``icr`` per sample.
@@ -121,7 +125,7 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
             )
         if report.exploration_reward is not None:
             print(
-                f"  exploration_reward (mean_i pass_i * (1-P_i)^γ for this prompt group): "
+                f"  exploration_reward (per weighted-inst mode; see inst_weight_mode): "
                 f"{report.exploration_reward:.6f}"
             )
     else:
@@ -253,9 +257,9 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
     """IFVerify group rewards via weighted instruction base scores (see module).
 
     Groups by ``uid``; builds K×N from ``follow_instruction_list``. When grouping is valid,
-    **Base reward** (if ``weighted_inst_base_score``) is the mean over instructions of
-    ``pass_i * (1 + (1 − P_i)^gamma)``. **Exploration** (mean of ``pass_i * (1 − P_i)^gamma``)
-    is logged as ``exploration_reward`` only when ``weighted_inst_base_score`` is True.
+    **Base reward** follows ``inst_weight_mode``: ``none`` (plain mean pass), ``linear``, or
+    ``exp`` (``W_i = exp(λ(1-P_i))``). **Exploration** is logged as ``exploration_reward`` for
+    ``linear`` and ``exp`` (see ``_weighted_instruction_base_reward``).
 
     Also logs **GII**, **VIA**, and **ICR** per group for monitoring.
     ``follow_instruction_list`` is consumed internally and not returned in
@@ -268,16 +272,23 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         num_examine: int,
         compute_score: Any = None,
         reward_fn_key: str = "data_source",
-        weighted_inst_base_score: bool = False,
+        inst_weight_mode: str = "none",
         focal_gamma: float = 1.0,
+        focal_exp_lambda: float = 1.0,
         **kwargs: Any,
     ) -> None:
         self.tokenizer = tokenizer
         self.num_examine = num_examine
         self.compute_score = compute_score or default_compute_score
         self.reward_fn_key = reward_fn_key
-        self.weighted_inst_base_score = bool(weighted_inst_base_score)
+        mode = str(inst_weight_mode).lower().strip()
+        if mode not in ("none", "linear", "exp"):
+            raise ValueError(
+                f"inst_weight_mode must be 'none', 'linear', or 'exp', got {inst_weight_mode!r}"
+            )
+        self.inst_weight_mode = mode
         self.focal_gamma = float(focal_gamma)
+        self.focal_exp_lambda = float(focal_exp_lambda)
         _ = kwargs
 
     def __call__(self, data: DataProto, return_dict: bool = False) -> torch.Tensor | dict[str, Any]:
@@ -343,8 +354,8 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                 reward_extra_info[key].append(value)
 
             # Per-response instruction accuracy (fraction of constraints satisfied); batch mean
-            # is logged as training/instruction_acc. Uid-group weighted base overwrites tensor
-            # reward when ``weighted_inst_base_score`` is enabled.
+            # is logged as training/instruction_acc. Uid-group instruction weighting overwrites
+            # tensor reward when ``inst_weight_mode`` is ``linear`` or ``exp``.
             reward_extra_info["instruction_acc"].append(float(score["score"]))
 
             last_pos = last_reward_pos[i]
@@ -365,7 +376,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         reward_extra_info["pair_bonus"] = [0.0] * n_items
         reward_extra_info["single_bonus"] = [0.0] * n_items
         reward_extra_info["prompt_extra_bonus"] = [0.0] * n_items
-        if self.weighted_inst_base_score:
+        if self.inst_weight_mode in ("linear", "exp"):
             reward_extra_info["exploration_reward"] = [0.0] * n_items
         reward_extra_info["prompt_acc"] = [0.0] * n_items
         reward_extra_info["gii"] = [0.0] * n_items
@@ -412,9 +423,13 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     for g, idx in enumerate(indices):
                         pos = last_reward_pos[idx]
                         row = info_matrix[g]
-                        if self.weighted_inst_base_score and n_inst > 0:
+                        if self.inst_weight_mode in ("linear", "exp") and n_inst > 0:
                             w_base, ex = _weighted_instruction_base_reward(
-                                row, p_inst, gamma=self.focal_gamma
+                                row,
+                                p_inst,
+                                gamma=self.focal_gamma,
+                                inst_weight_mode=self.inst_weight_mode,
+                                exp_lambda=self.focal_exp_lambda,
                             )
                             reward_extra_info["exploration_reward"][idx] = float(ex)
                             reward_tensor[idx, pos] = float(w_base)
@@ -450,10 +465,10 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     icr=float(reward_extra_info["icr"][idx]) if has_metrics else None,
                     exploration_reward=(
                         float(ex_list[idx])
-                        if has_metrics and self.weighted_inst_base_score
+                        if has_metrics and self.inst_weight_mode in ("linear", "exp")
                         else None
                     ),
-                    log_exploration_reward=self.weighted_inst_base_score,
+                    log_exploration_reward=self.inst_weight_mode in ("linear", "exp"),
                     rollouts=tuple(rollouts_list),
                 )
                 print_ifverify_debug_report(report)

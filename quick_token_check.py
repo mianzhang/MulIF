@@ -9,6 +9,7 @@ Usage:
     python quick_token_check.py file.parquet --tokenizer /path/to/tokenizer
     python quick_token_check.py file.parquet --save-lengths lengths.pkl
     python quick_token_check.py file.jsonl --column messages --save-lengths lengths.pkl
+    python quick_token_check.py file.jsonl --column messages --max-tokens 8192 --filter-output filtered.jsonl
 """
 
 import argparse
@@ -18,6 +19,7 @@ import numpy as np
 import os
 import json
 import pickle
+from collections import defaultdict
 from tqdm import tqdm
 
 def parse_args():
@@ -40,6 +42,9 @@ Examples:
 
   # Save lengths for specific column
   python quick_token_check.py data.jsonl --column messages --save-lengths lengths.pkl
+
+  # Drop rows longer than max tokens; write legal rows to a new JSONL (or filtered parquet)
+  python quick_token_check.py data.jsonl --column messages --max-tokens 8192 --filter-output kept.jsonl
         """
     )
     
@@ -75,6 +80,22 @@ Examples:
         action='store_true',
         help='When saving lengths, convert plain text to conversation format first. '
              'This ensures keys match VERL format: [{"role": "user", "content": text}]'
+    )
+    
+    parser.add_argument(
+        '--max-tokens',
+        type=int,
+        default=None,
+        metavar='N',
+        help='With --filter-output: keep only rows whose tokenized --column length is <= N'
+    )
+    
+    parser.add_argument(
+        '--filter-output',
+        type=str,
+        default=None,
+        metavar='OUTPUT_FILE',
+        help='Write rows at or below --max-tokens to this file (.jsonl for JSONL input, .parquet for parquet)'
     )
     
     return parser.parse_args()
@@ -163,10 +184,96 @@ def tokenize_content(content, tokenizer, force_chat_template=False):
     
     return tokens
 
+
+def stream_filter_jsonl(
+    file_path,
+    column_name,
+    tokenizer,
+    max_tokens,
+    filter_output_path,
+    force_chat_template=False,
+    length_dict=None,
+):
+    """
+    Read JSONL line-by-line, tokenize ``column_name`` per row, write original lines
+    with length <= max_tokens to ``filter_output_path``. Returns token lengths for
+    every parsed row (including dropped), keep/drop counts, and optional per-data_source lengths.
+    If ``length_dict`` is a dict, fill it with content-key -> token length (same keys as --save-lengths).
+    """
+    all_lengths = []
+    kept = 0
+    dropped = 0
+    skipped = 0
+    ds_lengths = defaultdict(list)
+
+    parent = os.path.dirname(os.path.abspath(filter_output_path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    with open(file_path, 'r', encoding='utf-8') as fin, open(
+        filter_output_path, 'w', encoding='utf-8'
+    ) as fout:
+        for line in tqdm(fin, desc="Filter JSONL", unit="line"):
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            if column_name not in obj:
+                skipped += 1
+                continue
+            content = obj[column_name]
+            tokens = tokenize_content(content, tokenizer, force_chat_template=force_chat_template)
+            n = len(tokens)
+            all_lengths.append(n)
+            ds = obj.get('data_source')
+            if ds is not None:
+                ds_lengths[ds].append(n)
+
+            if length_dict is not None:
+                if force_chat_template and not is_conversation_format(content):
+                    content_for_key = convert_to_conversation_format(content)
+                else:
+                    content_for_key = content
+                if isinstance(content_for_key, list):
+                    key = json.dumps(content_for_key, ensure_ascii=False, sort_keys=True)
+                else:
+                    key = str(content_for_key)
+                length_dict[key] = n
+
+            if n <= max_tokens:
+                fout.write(line if line.endswith('\n') else line + '\n')
+                kept += 1
+            else:
+                dropped += 1
+
+    return all_lengths, kept, dropped, skipped, ds_lengths
+
+
+def peek_first_jsonl_object(file_path):
+    """Return the first successfully parsed JSON object from a JSONL file, or None."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 def main():
     args = parse_args()
     
+    if args.filter_output is not None and args.max_tokens is None:
+        print("✗ Error: --filter-output requires --max-tokens")
+        return 1
+    
     file_path = args.file
+    file_ext = os.path.splitext(file_path)[1].lower()
     tokenizer_path = args.tokenizer
     save_lengths_file = args.save_lengths
     column_name = args.column
@@ -175,9 +282,108 @@ def main():
     print(f"🔤 Tokenizer: {tokenizer_path}")
     print(f"📋 Column to analyze: {column_name}")
     
-    # Load data and tokenizer
-    df, file_format = load_data(file_path)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    
+    # Stream JSONL when filtering: avoids loading the full file into memory twice
+    if args.filter_output is not None and file_ext in ['.jsonl', '.json']:
+        first = peek_first_jsonl_object(file_path)
+        if first is None:
+            print("✗ Error: no valid JSON object found in JSONL file")
+            return 1
+        if column_name not in first:
+            print(f"\n✗ Error: Column '{column_name}' not found in file")
+            print(f"Available keys (first row): {', '.join(first.keys())}")
+            return 1
+        
+        first_content = first.get(column_name)
+        is_conversation = is_conversation_format(first_content) if first_content is not None else False
+        format_type = "conversation (chat template)" if is_conversation else "plain text"
+        print(f"🔍 Detected content format: {format_type}")
+        if args.force_chat_template and not is_conversation:
+            print("⚠️  --force-chat-template enabled: will convert plain text to conversation format")
+        
+        length_dict = {} if save_lengths_file else None
+        all_lengths, kept, dropped, skipped, ds_lengths = stream_filter_jsonl(
+            file_path,
+            column_name,
+            tokenizer,
+            args.max_tokens,
+            args.filter_output,
+            force_chat_template=args.force_chat_template,
+            length_dict=length_dict,
+        )
+        
+        if not all_lengths:
+            print("✗ Error: no rows could be tokenized (empty file, bad JSON, or missing column on all lines)")
+            return 1
+        
+        tokenized = kept + dropped
+        print(f"📊 Rows tokenized: {tokenized}, skipped (bad JSON / missing column): {skipped}")
+        print(f"🔻 Filter (≤ {args.max_tokens} tokens on '{column_name}'): kept {kept}, dropped {dropped}")
+        print(f"💾 Wrote legal rows to: {args.filter_output}")
+        
+        print("\n" + "="*60)
+        print("TOKEN LENGTH ANALYSIS (all tokenized rows, before filter)")
+        print("="*60)
+        
+        if ds_lengths:
+            for group_name in sorted(ds_lengths.keys()):
+                token_lengths = ds_lengths[group_name]
+                min_len = min(token_lengths)
+                max_len = max(token_lengths)
+                mean_len = np.mean(token_lengths)
+                p95_len = np.percentile(token_lengths, 95)
+                thresholds = [512, 1024, 2048, 4096, 8192]
+                under_counts = {t: sum(1 for x in token_lengths if x <= t) for t in thresholds}
+                print(f"\n{group_name} ({len(token_lengths)} samples):")
+                print(f"  Range: {min_len} - {max_len} tokens (avg: {mean_len:.0f})")
+                print(f"  95th percentile: {p95_len:.0f}")
+                for threshold in thresholds:
+                    count = under_counts[threshold]
+                    pct = count / len(token_lengths) * 100
+                    print(f"  ≤ {threshold} tokens: {count}/{len(token_lengths)} ({pct:.1f}%)")
+        else:
+            token_lengths = all_lengths
+            min_len = min(token_lengths)
+            max_len = max(token_lengths)
+            mean_len = np.mean(token_lengths)
+            p95_len = np.percentile(token_lengths, 95)
+            thresholds = [512, 1024, 2048, 4096, 8192]
+            under_counts = {t: sum(1 for x in token_lengths if x <= t) for t in thresholds}
+            print(f"\nall_data ({len(token_lengths)} samples):")
+            print(f"  Range: {min_len} - {max_len} tokens (avg: {mean_len:.0f})")
+            print(f"  95th percentile: {p95_len:.0f}")
+            for threshold in thresholds:
+                count = under_counts[threshold]
+                pct = count / len(token_lengths) * 100
+                print(f"  ≤ {threshold} tokens: {count}/{len(token_lengths)} ({pct:.1f}%)")
+        
+        overall_max = max(all_lengths) if all_lengths else 0
+        print(f"\n{'='*60}")
+        print("OVERALL STATISTICS")
+        print(f"{'='*60}")
+        thresholds = [512, 1024, 2048, 4096, 8192]
+        for threshold in thresholds:
+            count = sum(1 for x in all_lengths if x <= threshold)
+            pct = count / len(all_lengths) * 100 if all_lengths else 0
+            print(f"  ≤ {threshold} tokens: {count}/{len(all_lengths)} ({pct:.1f}%)")
+        print(f"  Set data.max_prompt_length={overall_max} + N")
+        
+        if save_lengths_file is not None and length_dict is not None:
+            print(f"\n{'='*60}")
+            print("SAVING LENGTH INFORMATION")
+            print(f"{'='*60}")
+            with open(save_lengths_file, 'wb') as f:
+                pickle.dump(length_dict, f)
+            print(f"  ✓ Saved {len(length_dict)} content-to-length mappings")
+            print(f"  ✓ Output file: {save_lengths_file}")
+            if args.force_chat_template:
+                print('  ℹ️  Keys saved in conversation format: [{"role": "user", "content": ...}]')
+        
+        return 0
+    
+    # Load data and tokenizer (parquet, or JSONL without --filter-output)
+    df, file_format = load_data(file_path)
     
     # Verify column exists
     if column_name not in df.columns:
@@ -256,7 +462,23 @@ def main():
         pct = count/len(all_lengths)*100
         print(f"  ≤ {threshold} tokens: {count}/{len(all_lengths)} ({pct:.1f}%)")
     
-    print(f"  Set data.max_prompt_length={overall_max}) + N")
+    print(f"  Set data.max_prompt_length={overall_max} + N")
+    
+    # Drop long rows and save legal rows (parquet input only; JSONL uses streaming above)
+    if args.filter_output is not None and file_ext == '.parquet':
+        mask = np.array(all_lengths) <= args.max_tokens
+        kept = int(mask.sum())
+        dropped = len(all_lengths) - kept
+        out_parquet = os.path.abspath(args.filter_output)
+        parent = os.path.dirname(out_parquet)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        df.loc[mask].to_parquet(args.filter_output, index=False)
+        print(f"\n{'='*60}")
+        print("FILTER OUTPUT")
+        print(f"{'='*60}")
+        print(f"🔻 Filter (≤ {args.max_tokens} tokens on '{column_name}'): kept {kept}, dropped {dropped}")
+        print(f"💾 Wrote legal rows to: {args.filter_output}")
     
     # Save length information if requested
     if save_lengths_file is not None:

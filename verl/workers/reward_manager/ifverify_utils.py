@@ -103,17 +103,33 @@ def _marginal_pass_rates(info_matrix: np.ndarray) -> np.ndarray:
 
 
 def _weighted_instruction_base_reward(
-    row: np.ndarray, p_inst: np.ndarray, gamma: float = 1.0
+    row: np.ndarray,
+    p_inst: np.ndarray,
+    *,
+    gamma: float = 1.0,
+    inst_weight_mode: str = "none",
+    exp_lambda: float = 1.0,
 ) -> tuple[float, float]:
     """Per-response weighted base and exploration means from one pass over instructions.
 
-    Let ``e_i = (1 - P_i)^gamma``. Returns:
+    **Linear mode** (``inst_weight_mode == "linear"``): let ``e_i = (1 - P_i)^gamma``.
 
     - **Base** (mean): ``(1/N) * sum_i row_i * (1 + e_i)`` — same as ``mean(row) + exploration``.
     - **Exploration** (mean): ``(1/N) * sum_i row_i * e_i``.
 
+    **Exponential mode** (``inst_weight_mode == "exp"``): per-instruction weight
+    ``W_i = exp(exp_lambda * (1 - P_i))`` (local marginal ``P_i``).
+
+    - **Base** (mean): ``(1/N) * sum_i row_i * W_i``.
+    - **Exploration** (mean): ``(1/N) * sum_i row_i * (W_i - 1)`` (extra vs. unit weights).
+
+    When ``exp_lambda == 0`` or all ``P_i == 1``, ``W_i == 1`` and base equals ``mean(row)``.
+
+    **None mode** (``inst_weight_mode == "none"``): no per-instruction weighting — base is
+    ``mean(row)``, exploration is ``0.0``.
+
     When ``row`` and ``p_inst`` lengths differ, base falls back to ``mean(row)`` and
-    exploration is ``0.0``. When all ``P_i == 1``, ``e_i = 0`` and base equals ``mean(row)``.
+    exploration is ``0.0``.
     """
     if row.size == 0 or p_inst.size == 0:
         return (0.0, 0.0)
@@ -121,7 +137,21 @@ def _weighted_instruction_base_reward(
     if n != int(p_inst.shape[0]):
         return (float(np.mean(row)), 0.0)
     rw = row.astype(np.float64)
-    p = p_inst.astype(np.float64)
+    p = np.clip(p_inst.astype(np.float64), 0.0, 1.0)
+    mode = inst_weight_mode.lower().strip()
+    if mode == "none":
+        m = float(np.mean(rw))
+        return (m, 0.0)
+    if mode == "exp":
+        lam = float(exp_lambda)
+        w = np.exp(lam * (1.0 - p))
+        exploration = float(np.sum(rw * (w - 1.0)) / n)
+        weighted_base = float(np.sum(rw * w) / n)
+        return (weighted_base, exploration)
+    if mode != "linear":
+        raise ValueError(
+            f"inst_weight_mode must be 'none', 'linear', or 'exp', got {inst_weight_mode!r}"
+        )
     g = float(gamma)
     e = np.power(1.0 - p, g)
     exploration = float(np.sum(rw * e) / n)
