@@ -28,7 +28,9 @@ Config: ``inst_weight_mode``, ``focal_gamma`` (γ, linear only), ``focal_exp_lam
 ``linear`` or ``exp``.
 
 Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
-``gii`` / ``via`` / ``icr`` per sample.
+``gii`` / ``via`` / ``icr`` per sample. **inst_mixed_portion** is the fraction of instructions
+whose marginal pass rate ``P_i`` is strictly between 0 and 1 (exploration weighting can matter;
+``P_i`` in ``{0, 1}`` yields no exploration term for that instruction).
 """
 
 import os
@@ -261,7 +263,8 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
     ``exp`` (``W_i = exp(λ(1-P_i))``). **Exploration** is logged as ``exploration_reward`` for
     ``linear`` and ``exp`` (see ``_weighted_instruction_base_reward``).
 
-    Also logs **GII**, **VIA**, and **ICR** per group for monitoring.
+    Also logs **GII**, **VIA**, **ICR**, and **inst_mixed_portion** (share of instructions with
+    ``0 < P_i < 1``) per group for monitoring.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
     """
@@ -382,6 +385,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         reward_extra_info["gii"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
         reward_extra_info["icr"] = [0.0] * n_items
+        reward_extra_info["inst_mixed_portion"] = [0.0] * n_items
         info_matrix_per_idx: list[np.ndarray | None] = [None] * n_items
 
         uid_to_indices: dict[Any, list[int]] | None = None
@@ -416,6 +420,13 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                         reward_extra_info["via"][idx] = via
                         reward_extra_info["icr"][idx] = icr
                     p_inst = _marginal_pass_rates(info_matrix)
+                    if n_inst > 0:
+                        mixed = (p_inst > 0) & (p_inst < 1)
+                        inst_mixed_portion = float(np.mean(mixed))
+                    else:
+                        inst_mixed_portion = 0.0
+                    for idx in indices:
+                        reward_extra_info["inst_mixed_portion"][idx] = inst_mixed_portion
 
                     for idx in indices:
                         info_matrix_per_idx[idx] = info_matrix
