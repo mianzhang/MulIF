@@ -92,13 +92,21 @@ _NUM_CONJUNCTIONS = 6
 
 azure_base_url = os.environ.get("AZURE_OPENAI_BASE_URL")
 azure_api_key = os.environ.get("AZURE_OPENAI_API_KEY")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
 if azure_base_url and azure_api_key:
     async_client = AsyncOpenAI(api_key=azure_api_key, base_url=azure_base_url)
+elif openai_api_key:
+    async_client = AsyncOpenAI(api_key=openai_api_key)
 else:
-    async_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    async_client = None
 
 
 async def _async_completions_create_with_backoff(**kwargs):
+    if async_client is None:
+        raise RuntimeError(
+            "LLM checking requested but no API credentials found. "
+            "Set AZURE_OPENAI_BASE_URL/AZURE_OPENAI_API_KEY or OPENAI_API_KEY."
+        )
     async for attempt in AsyncRetrying(
         retry=retry_if_exception_type(
             (RateLimitError, APITimeoutError, APIConnectionError, InternalServerError)
@@ -4252,11 +4260,11 @@ class CopySpanIdxChecker(Instruction):
             raise ValueError("prompt_to_repeat must be set.")
         else:
             self._prompt_to_repeat = prompt_to_repeat
-        if not n_start:
+        if n_start is None:
             self._n_start = random.randint(0, len(self._prompt_to_repeat) - 2)
         else:
             self._n_start = n_start
-        if not n_end:
+        if n_end is None:
             self._n_end = random.randint(self._n_start + 1, len(self._prompt_to_repeat) - 1)
         else:
             self._n_end = n_end
@@ -4883,10 +4891,22 @@ class CopyingMultipleChecker(Instruction):
         return ["prompt_to_repeat", "N"]
 
     def check_following(self, value):
-        prompts = value.split("******")
+        prompt = self._prompt_to_repeat
+        leading_stars = len(prompt) - len(prompt.lstrip("*"))
+        trailing_stars = len(prompt) - len(prompt.rstrip("*"))
+        separator = "*" * (6 + leading_stars + trailing_stars)
+        prompts = value.split(separator)
         if len(prompts) != self._N:
             return False
-        return all(prompt.strip().lower() == self._prompt_to_repeat.strip().lower() for prompt in prompts)
+        for idx, part in enumerate(prompts):
+            restored = part
+            if idx > 0 and leading_stars:
+                restored = ("*" * leading_stars) + restored
+            if idx < self._N - 1 and trailing_stars:
+                restored = restored + ("*" * trailing_stars)
+            if restored.strip().lower() != prompt.strip().lower():
+                return False
+        return True
 
 
 class PunctuationDotChecker(Instruction):
@@ -5042,7 +5062,7 @@ class CountingCompositionChecker(Instruction):
         Returns:
           True if the response meets the requirements; otherwise, False.
         """
-        paragraphs = re.split(r"\s?\*\*\*\s?", value)
+        paragraphs = re.split(r"\s?\* \* \*\s?", value)
         num_paragraphs = len(paragraphs)
 
         for index, paragraph in enumerate(paragraphs):
@@ -5059,6 +5079,11 @@ class CountingCompositionChecker(Instruction):
                 return False
 
             for sentence in sentences:
+                sentence = (
+                    sentence.strip()
+                    .translate(str.maketrans("", "", string.punctuation))
+                    .strip()
+                )
                 words = instructions_util.nltk.word_tokenize(sentence)
                 num_words = len(words)
 

@@ -21,7 +21,9 @@ if model_cache_dir is None:
 model_pool = [
     # 'Qwen/Qwen3-0.6B',
     # 'Qwen/Qwen3-1.7B',
-    'billmianz/sg_baseline_rule_qwen17b_step125'
+    # 'billmianz/sg_baseline_rule_qwen17b_step125'
+    # 'billmianz/IFTrain_baseline_qwen17b_step500'
+    'billmianz/qwen17b_sft1'
     # 'Qwen/Qwen3-4B',
     # 'Qwen/Qwen3-8B'
     ]

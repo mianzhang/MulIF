@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import argparse
+import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -315,6 +316,40 @@ class BaseModelMerger(ABC):
         if tokenizer is not None:
             print(f"Saving tokenizer to {self.config.target_dir}")
             tokenizer.save_pretrained(self.config.target_dir)
+            self._ensure_inline_chat_template(tokenizer, self.config.target_dir)
+
+    @staticmethod
+    def _ensure_inline_chat_template(tokenizer, target_dir: str) -> None:
+        """
+        Ensure chat_template is present in tokenizer_config.json for compatibility
+        with inference stacks that do not read chat_template.jinja.
+        """
+        chat_template = getattr(tokenizer, "chat_template", None)
+        if not chat_template:
+            return
+
+        tokenizer_config_path = os.path.join(target_dir, "tokenizer_config.json")
+        if not os.path.exists(tokenizer_config_path):
+            return
+
+        try:
+            with open(tokenizer_config_path, "r", encoding="utf-8") as f:
+                tokenizer_config = json.load(f)
+        except Exception as e:
+            print(f"Warning: failed to read tokenizer config at {tokenizer_config_path}: {e}")
+            return
+
+        if tokenizer_config.get("chat_template") == chat_template:
+            return
+
+        tokenizer_config["chat_template"] = chat_template
+        try:
+            with open(tokenizer_config_path, "w", encoding="utf-8") as f:
+                json.dump(tokenizer_config, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            print(f"Inlined chat_template into {tokenizer_config_path}")
+        except Exception as e:
+            print(f"Warning: failed to write tokenizer config at {tokenizer_config_path}: {e}")
 
     def upload_to_huggingface(self):
         import requests

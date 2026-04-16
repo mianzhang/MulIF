@@ -64,6 +64,7 @@ class MultiTurnSFTDataset(Dataset):
         self.messages_key = multiturn_config.get("messages_key", "messages")
         self.tools_key = multiturn_config.get("tools_key", "tools")
         self.enable_thinking_key = multiturn_config.get("enable_thinking_key", "enable_thinking")
+        self.default_enable_thinking = config.get("default_enable_thinking", None)
         self.apply_chat_template_kwargs = config.get("apply_chat_template_kwargs", {})
         assert self.truncation in ["error", "left", "right"]
 
@@ -238,7 +239,10 @@ class MultiTurnSFTDataset(Dataset):
         tokenizer = self.tokenizer
         messages = self.messages[item]
         tools = self.tools[item] if self.tools is not None else None
-        enable_thinking = self.enable_thinking[item] if self.enable_thinking is not None else None
+        if self.enable_thinking is not None:
+            enable_thinking = self.enable_thinking[item]
+        else:
+            enable_thinking = self.default_enable_thinking
 
         # First, get the full conversation tokens
         try:
