@@ -18,7 +18,7 @@ else
     DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
     DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
     DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
-    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/IFTrain_baseline_qwen17b_sft1"
+    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/IFTrain_baseline_qwen17b_sft1"
     DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/IFTrain_baseline_qwen17b_sft1"
 fi
 
