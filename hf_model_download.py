@@ -23,7 +23,9 @@ model_pool = [
     # 'Qwen/Qwen3-1.7B',
     # 'billmianz/sg_baseline_rule_qwen17b_step125'
     # 'billmianz/IFTrain_baseline_qwen17b_step500'
-    'billmianz/qwen17b_sft1'
+    # 'billmianz/qwen17b_sft1'
+    'billmianz/IFTrain_baseline_qwen17b_sft1_step200',
+    'billmianz/IFTrain_baseline_qwen17b_sft1_step500'
     # 'Qwen/Qwen3-4B',
     # 'Qwen/Qwen3-8B'
     ]

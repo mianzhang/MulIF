@@ -24,6 +24,9 @@ _LOW_ACC_K = 5
 # Used by ifverify_sg_rank and ifverify_bg for lowest-pair / lowest-single selection.
 _LOW_ACC_ELIGIBLE_MAX = 0.5
 
+# Floor for marginal P_i in ``log`` inst-weight mode so ``-log(P)`` is finite when P == 0.
+_LOG_INST_WEIGHT_MIN_P = 1e-12
+
 # (instruction i, instruction j, pair score); i < j.
 LowPairAccEntry = tuple[int, int, float]
 # (instruction index, marginal pass rate P_i).
@@ -109,54 +112,52 @@ def _weighted_instruction_base_reward(
     gamma: float = 1.0,
     inst_weight_mode: str = "none",
     exp_lambda: float = 1.0,
-) -> tuple[float, float]:
-    """Per-response weighted base and exploration means from one pass over instructions.
+) -> float:
+    """Per-response weighted mean instruction reward from one pass over instructions.
 
-    **Linear mode** (``inst_weight_mode == "linear"``): let ``e_i = (1 - P_i)^gamma``.
+    **Linear mode** (``inst_weight_mode == "linear"``): per-instruction weight ``W_i = 1 - P_i``
+    (marginal instruction accuracy ``P_i``). Returns ``(1/N) * sum_i row_i * W_i``.
+    The ``gamma`` argument is ignored in linear mode.
 
-    - **Base** (mean): ``(1/N) * sum_i row_i * (1 + e_i)`` — same as ``mean(row) + exploration``.
-    - **Exploration** (mean): ``(1/N) * sum_i row_i * e_i``.
+    **Exponential mode** (``inst_weight_mode == "exp"``): ``W_i = exp(exp_lambda * (1 - P_i))``.
+    Returns ``(1/N) * sum_i row_i * W_i``.
 
-    **Exponential mode** (``inst_weight_mode == "exp"``): per-instruction weight
-    ``W_i = exp(exp_lambda * (1 - P_i))`` (local marginal ``P_i``).
+    When ``exp_lambda == 0`` or all ``P_i == 1``, ``W_i == 1`` and the return value equals
+    ``mean(row)``.
 
-    - **Base** (mean): ``(1/N) * sum_i row_i * W_i``.
-    - **Exploration** (mean): ``(1/N) * sum_i row_i * (W_i - 1)`` (extra vs. unit weights).
+    **Log mode** (``inst_weight_mode == "log"``): ``W_i = -log(max(P_i, epsilon))`` (natural log)
+    with ``epsilon = _LOG_INST_WEIGHT_MIN_P`` so weights stay finite when ``P_i = 0``. Returns
+    ``(1/N) * sum_i row_i * W_i``. The ``gamma`` and ``exp_lambda`` arguments are ignored.
 
-    When ``exp_lambda == 0`` or all ``P_i == 1``, ``W_i == 1`` and base equals ``mean(row)``.
+    **None mode** (``inst_weight_mode == "none"``): no per-instruction weighting — returns
+    ``mean(row)``.
 
-    **None mode** (``inst_weight_mode == "none"``): no per-instruction weighting — base is
-    ``mean(row)``, exploration is ``0.0``.
-
-    When ``row`` and ``p_inst`` lengths differ, base falls back to ``mean(row)`` and
-    exploration is ``0.0``.
+    When ``row`` and ``p_inst`` lengths differ, falls back to ``mean(row)``.
     """
     if row.size == 0 or p_inst.size == 0:
-        return (0.0, 0.0)
+        return 0.0
     n = int(row.shape[0])
     if n != int(p_inst.shape[0]):
-        return (float(np.mean(row)), 0.0)
+        return float(np.mean(row))
     rw = row.astype(np.float64)
     p = np.clip(p_inst.astype(np.float64), 0.0, 1.0)
     mode = inst_weight_mode.lower().strip()
     if mode == "none":
-        m = float(np.mean(rw))
-        return (m, 0.0)
+        return float(np.mean(rw))
     if mode == "exp":
         lam = float(exp_lambda)
         w = np.exp(lam * (1.0 - p))
-        exploration = float(np.sum(rw * (w - 1.0)) / n)
-        weighted_base = float(np.sum(rw * w) / n)
-        return (weighted_base, exploration)
-    if mode != "linear":
-        raise ValueError(
-            f"inst_weight_mode must be 'none', 'linear', or 'exp', got {inst_weight_mode!r}"
-        )
-    g = float(gamma)
-    e = np.power(1.0 - p, g)
-    exploration = float(np.sum(rw * e) / n)
-    weighted_base = float(np.sum(rw * (1.0 + e)) / n)
-    return (weighted_base, exploration)
+        return float(np.sum(rw * w) / n)
+    if mode == "linear":
+        w = 1.0 - p
+        return float(np.sum(rw * w) / n)
+    if mode == "log":
+        p_floor = np.maximum(p, _LOG_INST_WEIGHT_MIN_P)
+        w = -np.log(p_floor)
+        return float(np.sum(rw * w) / n)
+    raise ValueError(
+        f"inst_weight_mode must be 'none', 'linear', 'exp', or 'log', got {inst_weight_mode!r}"
+    )
 
 
 def _lowest_pair_acc_mask_and_tuples(
