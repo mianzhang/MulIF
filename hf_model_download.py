@@ -31,8 +31,16 @@ model_pool = [
     ]
 
 for repo_id in model_pool:
+    local_dir = os.path.join(model_cache_dir, repo_id)
     Path(model_cache_dir).mkdir(parents=True, exist_ok=True)
+    print(f"[hf_model_download] Downloading {repo_id} -> {local_dir}")
     snapshot_download(
         repo_id,
-        local_dir=os.path.join(model_cache_dir, repo_id),
+        local_dir=local_dir,
     )
+    # Verify download
+    if Path(local_dir).exists():
+        files = list(Path(local_dir).iterdir())
+        print(f"[hf_model_download] Done. {len(files)} files in {local_dir}")
+    else:
+        print(f"[hf_model_download] WARNING: {local_dir} does not exist after download!")
