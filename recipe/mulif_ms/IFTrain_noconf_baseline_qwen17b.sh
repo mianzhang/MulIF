@@ -40,7 +40,7 @@ export DEBUG_SAMPLES=10
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$DATA_DIR/IFTrain_noconf_3c_5c.parquet \
+    data.train_files=$DATA_DIR/IFTrain_3c_5c_noconf.parquet \
     data.val_files="[$DATA_DIR/IFBench.parquet]" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
