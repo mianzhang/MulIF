@@ -553,8 +553,8 @@ class RayPPOTrainer:
         return gen_batch
 
     def _validate(self):
-        # GII/VIA need multiple rollouts per prompt; val is often n=1 so skip logging them.
-        skip_val_reward_extra_keys = frozenset({"gii", "via", "icr", "inst_mixed_portion"})
+        # VSA/VIA need multiple rollouts per prompt; val is often n=1 so skip logging them.
+        skip_val_reward_extra_keys = frozenset({"vsa", "via", "icr", "inst_mixed_portion"})
         data_source_lst = []
         reward_extra_infos_dict: dict[str, list] = defaultdict(list)
 
@@ -1303,7 +1303,7 @@ class RayPPOTrainer:
                 # Log batch-level IFVerify auxiliary metrics when available.
                 if reward_extra_infos_dict:
                     for key in (
-                        "gii",
+                        "vsa",
                         "via",
                         "icr",
                         "inst_mixed_portion",

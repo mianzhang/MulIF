@@ -20,18 +20,16 @@ reward is set from per-instruction passes (marginals ``P_i`` from the group):
 - **none** (default): use the verifier score mean only (no exploration weighting).
 - **linear**: base mean ``(1/N) * sum_i pass_i * (1 - P_i)`` with per-instruction weight
   ``(1 - P_i)``; no separate exploration term.
-- **exp**: base mean ``(1/N) * sum_i pass_i * W_i`` with ``W_i = exp(λ(1 - P_i))`` and
-  ``focal_exp_lambda`` = λ.
 - **log**: base mean ``(1/N) * sum_i pass_i * W_i`` with ``W_i = -log(max(P_i, ε))`` (natural log;
   see ``_LOG_INST_WEIGHT_MIN_P`` in ``ifverify_utils``).
 
-Config: ``inst_weight_mode``, ``focal_gamma`` (unused for linear/log; reserved for API compatibility),
-``focal_exp_lambda`` (λ, exp only).
+Config: ``inst_weight_mode``.
+Pairwise add-on config: ``pairwise_alpha`` and ``pairwise_epsilon``.
 
-Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
-``gii`` / ``via`` / ``icr`` per sample. **inst_mixed_portion** is the fraction of instructions
+Per uid group, **VSA**, **VIA**, and **ICR** (instruction coverage rate) are logged as
+``vsa`` / ``via`` / ``icr`` per sample. **inst_mixed_portion** is the fraction of instructions
 whose marginal pass rate ``P_i`` is strictly between 0 and 1 (marginal ``P_i`` still matters for
-linear, exp, and log weighting).
+linear and log weighting).
 """
 
 import os
@@ -52,7 +50,8 @@ from verl.workers.reward_manager.ifverify_utils import (
     _debug_sample_count,
     _instruction_coverage_rate,
     _marginal_pass_rates,
-    _prompt_gii,
+    _pairwise_synergy_bonus_for_row,
+    _prompt_vsa,
     _prompt_via,
     _truncate,
     _weighted_instruction_base_reward,
@@ -81,7 +80,7 @@ class IfverifyDebugReport:
     prompt: str
     task_id: Any
     info_matrix: np.ndarray | None
-    gii: float | None
+    vsa: float | None
     via: float | None
     icr: float | None
     exploration_reward: float | None
@@ -90,7 +89,7 @@ class IfverifyDebugReport:
 
 
 def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
-    """Pretty-print one structured IFVerify GII/VIA debug sample (stdout)."""
+    """Pretty-print one structured IFVerify VSA/VIA debug sample (stdout)."""
     w = 88
     sep = "=" * w
     sub = "-" * w
@@ -121,9 +120,9 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
         k, n_inst = mat.shape
         print(f"  task_id: {tid_s}")
         print(f"  size: K = {k} rollouts × N = {n_inst} instructions  (matrix rows = rollouts)")
-        if report.gii is not None and report.via is not None and report.icr is not None:
+        if report.vsa is not None and report.via is not None and report.icr is not None:
             print(
-                f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}  ·  "
+                f"  group metrics:  vsa = {report.vsa:.6f}  ·  via = {report.via:.6f}  ·  "
                 f"icr = {report.icr:.6f}"
             )
         if report.exploration_reward is not None:
@@ -261,10 +260,10 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
 
     Groups by ``uid``; builds K×N from ``follow_instruction_list``. When grouping is valid,
     **Base reward** follows ``inst_weight_mode``: ``none`` (plain mean pass), ``linear``
-    (``mean_i pass_i * (1 - P_i)``), ``exp`` (``mean_i pass_i * exp(λ(1-P_i))``), or ``log``
+    (``mean_i pass_i * (1 - P_i)``), or ``log``
     (``mean_i pass_i * (-log(max(P_i, ε)))``); see ``_weighted_instruction_base_reward``.
 
-    Also logs **GII**, **VIA**, **ICR**, and **inst_mixed_portion** (share of instructions with
+    Also logs **VSA**, **VIA**, **ICR**, and **inst_mixed_portion** (share of instructions with
     ``0 < P_i < 1``) per group for monitoring.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
@@ -277,8 +276,8 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         compute_score: Any = None,
         reward_fn_key: str = "data_source",
         inst_weight_mode: str = "none",
-        focal_gamma: float = 1.0,
-        focal_exp_lambda: float = 1.0,
+        pairwise_alpha: float = 0.0,
+        pairwise_epsilon: float = 1e-8,
         **kwargs: Any,
     ) -> None:
         self.tokenizer = tokenizer
@@ -286,13 +285,18 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         self.compute_score = compute_score or default_compute_score
         self.reward_fn_key = reward_fn_key
         mode = str(inst_weight_mode).lower().strip()
-        if mode not in ("none", "linear", "exp", "log"):
+        if mode not in ("none", "linear", "log"):
             raise ValueError(
-                f"inst_weight_mode must be 'none', 'linear', 'exp', or 'log', got {inst_weight_mode!r}"
+                f"inst_weight_mode must be 'none', 'linear', or 'log', got {inst_weight_mode!r}"
             )
         self.inst_weight_mode = mode
-        self.focal_gamma = float(focal_gamma)
-        self.focal_exp_lambda = float(focal_exp_lambda)
+        # Backward-compatible: ignore deprecated focal_gamma if passed via kwargs.
+        kwargs.pop("focal_gamma", None)
+        # Backward-compatible: ignore deprecated exp lambda args if still present.
+        kwargs.pop("focal_exp_lambda", None)
+        kwargs.pop("exp_lambda", None)
+        self.pairwise_alpha = float(pairwise_alpha)
+        self.pairwise_epsilon = float(pairwise_epsilon)
         _ = kwargs
 
     def __call__(self, data: DataProto, return_dict: bool = False) -> torch.Tensor | dict[str, Any]:
@@ -359,7 +363,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
 
             # Per-response instruction accuracy (fraction of constraints satisfied); batch mean
             # is logged as training/instruction_acc. Uid-group instruction weighting overwrites
-            # tensor reward when ``inst_weight_mode`` is ``linear``, ``exp``, or ``log``.
+            # tensor reward when ``inst_weight_mode`` is ``linear`` or ``log``.
             reward_extra_info["instruction_acc"].append(float(score["score"]))
 
             last_pos = last_reward_pos[i]
@@ -381,7 +385,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
         reward_extra_info["single_bonus"] = [0.0] * n_items
         reward_extra_info["prompt_extra_bonus"] = [0.0] * n_items
         reward_extra_info["prompt_acc"] = [0.0] * n_items
-        reward_extra_info["gii"] = [0.0] * n_items
+        reward_extra_info["vsa"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
         reward_extra_info["icr"] = [0.0] * n_items
         reward_extra_info["inst_mixed_portion"] = [0.0] * n_items
@@ -411,11 +415,12 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     if not all(len(r) == n_inst for r in rows):
                         continue
                     info_matrix = np.array(rows, dtype=np.float32)
-                    gii = _prompt_gii(info_matrix)
+                    counts = info_matrix.sum(axis=0)
+                    vsa = _prompt_vsa(info_matrix)
                     via = _prompt_via(info_matrix)
                     icr = _instruction_coverage_rate(info_matrix)
                     for idx in indices:
-                        reward_extra_info["gii"][idx] = gii
+                        reward_extra_info["vsa"][idx] = vsa
                         reward_extra_info["via"][idx] = via
                         reward_extra_info["icr"][idx] = icr
                     p_inst = _marginal_pass_rates(info_matrix)
@@ -433,15 +438,22 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     for g, idx in enumerate(indices):
                         pos = last_reward_pos[idx]
                         row = info_matrix[g]
-                        if self.inst_weight_mode in ("linear", "exp", "log") and n_inst > 0:
+                        if self.inst_weight_mode in ("linear", "log") and n_inst > 0:
                             w_base = _weighted_instruction_base_reward(
                                 row,
                                 p_inst,
-                                gamma=self.focal_gamma,
                                 inst_weight_mode=self.inst_weight_mode,
-                                exp_lambda=self.focal_exp_lambda,
                             )
-                            reward_tensor[idx, pos] = float(w_base)
+                            pair_bonus = _pairwise_synergy_bonus_for_row(
+                                row,
+                                info_matrix,
+                                counts,
+                                alpha=self.pairwise_alpha,
+                                epsilon=self.pairwise_epsilon,
+                            )
+                            reward_extra_info["single_bonus"][idx] = float(w_base)
+                            reward_extra_info["pair_bonus"][idx] = float(pair_bonus)
+                            reward_tensor[idx, pos] = float(w_base + pair_bonus)
 
         n_debug = _debug_sample_count()
         if n_items > 0 and n_debug > 0:
@@ -450,7 +462,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                 group_indices = (
                     uid_to_indices[uids[idx]] if mat is not None and uids is not None else None
                 )
-                ex_list = [0.0] * n_items
+                ex_list = reward_extra_info["pair_bonus"]
                 rollouts_list = _make_debug_rollouts(
                     spotlight_idx=idx,
                     mat=mat,
@@ -467,7 +479,7 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
                     prompt=score_inputs[idx][0],
                     task_id=score_inputs[idx][4]["task_id"],
                     info_matrix=mat,
-                    gii=float(reward_extra_info["gii"][idx]) if has_metrics else None,
+                    vsa=float(reward_extra_info["vsa"][idx]) if has_metrics else None,
                     via=float(reward_extra_info["via"][idx]) if has_metrics else None,
                     icr=float(reward_extra_info["icr"][idx]) if has_metrics else None,
                     exploration_reward=None,

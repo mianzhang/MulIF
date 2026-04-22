@@ -31,8 +31,8 @@ make the pair rank as **harder** (more “low-acc”) and are prioritized for th
 Config ``use_hit_rewards`` (default ``True``): when ``False``, the hit-reward branch is disabled;
 tensor reward is **1.0** only when all instructions pass, else **0.0**.
 
-Per uid group, **GII**, **VIA**, and **ICR** (instruction coverage rate) are logged as
-``gii`` / ``via`` / ``icr`` per sample.
+Per uid group, **VSA**, **VIA**, and **ICR** (instruction coverage rate) are logged as
+``vsa`` / ``via`` / ``icr`` per sample.
 """
 
 import os
@@ -59,7 +59,7 @@ from verl.workers.reward_manager.ifverify_utils import (
     _lowest_pair_acc_mask_and_tuples,
     _lowest_single_acc_mask_and_tuples,
     _marginal_pass_rates,
-    _prompt_gii,
+    _prompt_vsa,
     _prompt_via,
     _truncate,
     _wrap_indent,
@@ -113,7 +113,7 @@ class IfverifyDebugReport:
     prompt: str
     task_id: Any
     info_matrix: np.ndarray | None
-    gii: float | None
+    vsa: float | None
     via: float | None
     icr: float | None
     lowest_pair_accs: tuple[LowPairAccEntry, ...] | None
@@ -123,7 +123,7 @@ class IfverifyDebugReport:
 
 
 def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
-    """Pretty-print one structured IFVerify GII/VIA debug sample (stdout)."""
+    """Pretty-print one structured IFVerify VSA/VIA debug sample (stdout)."""
     w = 88
     sep = "=" * w
     sub = "-" * w
@@ -154,9 +154,9 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
         k, n_inst = mat.shape
         print(f"  task_id: {tid_s}")
         print(f"  size: K = {k} rollouts × N = {n_inst} instructions  (matrix rows = rollouts)")
-        if report.gii is not None and report.via is not None and report.icr is not None:
+        if report.vsa is not None and report.via is not None and report.icr is not None:
             print(
-                f"  group metrics:  gii = {report.gii:.6f}  ·  via = {report.via:.6f}  ·  "
+                f"  group metrics:  vsa = {report.vsa:.6f}  ·  via = {report.via:.6f}  ·  "
                 f"icr = {report.icr:.6f}  (instruction coverage rate)"
             )
         if report.lowest_pair_accs:
@@ -303,7 +303,7 @@ class IfverifyBgRewardManager(AbstractRewardManager):
     pass; **0.1** if not but the response hits any selected low-acc single or both ends of a
     selected low-acc pair; otherwise **0.0**. When ``use_hit_rewards`` is **False**, only **1.0**
     (all pass) or **0.0** apply.
-    Also logs **GII**, **VIA**, and **ICR** per group.
+    Also logs **VSA**, **VIA**, and **ICR** per group.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
     """
@@ -406,7 +406,7 @@ class IfverifyBgRewardManager(AbstractRewardManager):
 
         n_items = len(data)
         reward_extra_info["prompt_acc"] = [0.0] * n_items
-        reward_extra_info["gii"] = [0.0] * n_items
+        reward_extra_info["vsa"] = [0.0] * n_items
         reward_extra_info["via"] = [0.0] * n_items
         reward_extra_info["icr"] = [0.0] * n_items
         info_matrix_per_idx: list[np.ndarray | None] = [None] * n_items
@@ -437,11 +437,11 @@ class IfverifyBgRewardManager(AbstractRewardManager):
                     if not all(len(r) == n_inst for r in rows):
                         continue
                     info_matrix = np.array(rows, dtype=np.float32)
-                    gii = _prompt_gii(info_matrix)
+                    vsa = _prompt_vsa(info_matrix)
                     via = _prompt_via(info_matrix)
                     icr = _instruction_coverage_rate(info_matrix)
                     for idx in indices:
-                        reward_extra_info["gii"][idx] = gii
+                        reward_extra_info["vsa"][idx] = vsa
                         reward_extra_info["via"][idx] = via
                         reward_extra_info["icr"][idx] = icr
                     p_inst = _marginal_pass_rates(info_matrix)
@@ -490,7 +490,7 @@ class IfverifyBgRewardManager(AbstractRewardManager):
                     prompt=score_inputs[idx][0],
                     task_id=score_inputs[idx][4]["task_id"],
                     info_matrix=mat,
-                    gii=float(reward_extra_info["gii"][idx]) if has_metrics else None,
+                    vsa=float(reward_extra_info["vsa"][idx]) if has_metrics else None,
                     via=float(reward_extra_info["via"][idx]) if has_metrics else None,
                     icr=float(reward_extra_info["icr"][idx]) if has_metrics else None,
                     lowest_pair_accs=lowest_pair_accs_per_idx[idx] if has_metrics else None,

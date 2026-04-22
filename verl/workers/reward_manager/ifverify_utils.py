@@ -39,6 +39,31 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[: max(0, max_chars - 3)] + "..."
 
 
+def _prompt_vsa(info_matrix: np.ndarray, epsilon: float = 1e-8) -> float:
+    """VSA from K×N binary matrix (K rollouts, N instructions).
+
+    SA(i, j) = m_ij / (min(n_i, n_j) + epsilon), with SA(i, j) = 0 when n_i == 0 or n_j == 0.
+    VSA is the variance across all unique pairwise SA(i, j), i < j.
+    """
+    if info_matrix.size == 0:
+        return 0.0
+    _k, n = info_matrix.shape
+    if n <= 1:
+        return 0.0
+    counts = info_matrix.sum(axis=0)
+    pairwise_sa: list[float] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            n_i = float(counts[i])
+            n_j = float(counts[j])
+            if n_i <= 0.0 or n_j <= 0.0:
+                continue
+            both = float(np.sum(info_matrix[:, i] * info_matrix[:, j]))
+            sa_ij = both / (min(n_i, n_j) + epsilon)
+            pairwise_sa.append(sa_ij)
+    return float(np.var(pairwise_sa)) if pairwise_sa else 0.0
+
+
 def _prompt_gii(info_matrix: np.ndarray) -> float:
     """GII from K×N binary matrix (K rollouts, N instructions)."""
     if info_matrix.size == 0:
@@ -109,25 +134,16 @@ def _weighted_instruction_base_reward(
     row: np.ndarray,
     p_inst: np.ndarray,
     *,
-    gamma: float = 1.0,
     inst_weight_mode: str = "none",
-    exp_lambda: float = 1.0,
 ) -> float:
     """Per-response weighted mean instruction reward from one pass over instructions.
 
     **Linear mode** (``inst_weight_mode == "linear"``): per-instruction weight ``W_i = 1 - P_i``
     (marginal instruction accuracy ``P_i``). Returns ``(1/N) * sum_i row_i * W_i``.
-    The ``gamma`` argument is ignored in linear mode.
-
-    **Exponential mode** (``inst_weight_mode == "exp"``): ``W_i = exp(exp_lambda * (1 - P_i))``.
-    Returns ``(1/N) * sum_i row_i * W_i``.
-
-    When ``exp_lambda == 0`` or all ``P_i == 1``, ``W_i == 1`` and the return value equals
-    ``mean(row)``.
 
     **Log mode** (``inst_weight_mode == "log"``): ``W_i = -log(max(P_i, epsilon))`` (natural log)
     with ``epsilon = _LOG_INST_WEIGHT_MIN_P`` so weights stay finite when ``P_i = 0``. Returns
-    ``(1/N) * sum_i row_i * W_i``. The ``gamma`` and ``exp_lambda`` arguments are ignored.
+    ``(1/N) * sum_i row_i * W_i``.
 
     **None mode** (``inst_weight_mode == "none"``): no per-instruction weighting — returns
     ``mean(row)``.
@@ -144,10 +160,6 @@ def _weighted_instruction_base_reward(
     mode = inst_weight_mode.lower().strip()
     if mode == "none":
         return float(np.mean(rw))
-    if mode == "exp":
-        lam = float(exp_lambda)
-        w = np.exp(lam * (1.0 - p))
-        return float(np.sum(rw * w) / n)
     if mode == "linear":
         w = 1.0 - p
         return float(np.sum(rw * w) / n)
@@ -156,8 +168,51 @@ def _weighted_instruction_base_reward(
         w = -np.log(p_floor)
         return float(np.sum(rw * w) / n)
     raise ValueError(
-        f"inst_weight_mode must be 'none', 'linear', 'exp', or 'log', got {inst_weight_mode!r}"
+        f"inst_weight_mode must be 'none', 'linear', or 'log', got {inst_weight_mode!r}"
     )
+
+
+def _pairwise_synergy_bonus_for_row(
+    row: np.ndarray,
+    info_matrix: np.ndarray,
+    counts: np.ndarray,
+    *,
+    alpha: float = 0.0,
+    epsilon: float = 1e-8,
+) -> float:
+    """Additive pairwise synergy bonus for one rollout row.
+
+    For each satisfied instruction pair (j, k) in ``row``:
+    r_s(j, k) = 1 - m_{j,k} / (min(n_j, n_k) + epsilon), with n_j, n_k > 0.
+    Returns: alpha * sum_{(j,k) in satisfied pairs} r_s(j, k).
+    """
+    if alpha == 0.0:
+        return 0.0
+    if row.size == 0 or info_matrix.size == 0 or counts.size == 0:
+        return 0.0
+
+    satisfied = np.where(row > 0)[0]
+    if satisfied.size < 2:
+        return 0.0
+
+    pair_scores: list[float] = []
+    for a in range(len(satisfied)):
+        j = int(satisfied[a])
+        n_j = float(counts[j])
+        if n_j <= 0.0:
+            continue
+        for b in range(a + 1, len(satisfied)):
+            k = int(satisfied[b])
+            n_k = float(counts[k])
+            if n_k <= 0.0:
+                continue
+            m_jk = float(np.sum(info_matrix[:, j] * info_matrix[:, k]))
+            sa_jk = m_jk / (min(n_j, n_k) + float(epsilon))
+            pair_scores.append(1.0 - sa_jk)
+
+    if not pair_scores:
+        return 0.0
+    return float(alpha * float(np.sum(pair_scores)))
 
 
 def _lowest_pair_acc_mask_and_tuples(

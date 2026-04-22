@@ -45,10 +45,11 @@ python3 -m verl.trainer.main_ppo \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
     +reward_model.reward_kwargs.inst_weight_mode=linear \
+    +reward_model.reward_kwargs.pairwise_alpha=1.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='IFTrain_linear_base_qwen17b_sft1' \
+    trainer.experiment_name='IFTrain_linear_base_pairwise_alpha1_qwen17b_sft1' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.save_freq=25 \
@@ -58,6 +59,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=500 > log/IFTrain_linear_base_qwen17b_sft1.log
+    trainer.total_training_steps=500 > log/IFTrain_linear_base_pairwise_alpha1_qwen17b_sft1.log
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

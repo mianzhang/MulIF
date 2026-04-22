@@ -542,7 +542,7 @@ def compute_source_metrics(batch: DataProto) -> dict[str, Any]:
 
     # Compute average IFVerify reward extras per source if available (from reward_extra_info)
     for key in (
-        "gii",
+        "vsa",
         "via",
         "icr",
         "prompt_acc",
