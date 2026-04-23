@@ -1,4 +1,4 @@
 python -m verl.model_merger merge \
     --backend fsdp \
-    --local_dir checkpoints/single_hard_sft_lr5e6_bz16_epoch1/global_step_153 \
-    --target_dir hf_cache/qwen17b_sft2
+    --local_dir checkpoints/IFTrain_noconf_baseline_qwen17b/global_step_500 \
+    --target_dir hf_cache/IFTrain_noconf_baseline_qwen17b_step500
