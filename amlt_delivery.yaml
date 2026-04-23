@@ -28,7 +28,7 @@ code:
   local_dir: ./
 
 jobs:
-  - name: upload_IFTrain_linear_base_qwen17b_sft1_step200
+  - name: upload_IFTrain_noconf_baseline_qwen17b_step500
     sku: ${NODES}x${MEM}G${GPUS}
     process_count_per_node: 1
     sla_tier: Standard
@@ -41,8 +41,28 @@ jobs:
       - set +x && [ -f .env ] && set -a && . ./.env && set +a || true && set -x
       - export AZURE_STORAGE_ROOT=$${AZURE_STORAGE_ROOT:-/mnt/data/v-yinyueqin/projects/mulif}
       - set +x && [ -n "$$HF_TOKEN" ] && huggingface-cli login --token $$HF_TOKEN || true && set -x
-      - python -m verl.model_merger merge --backend fsdp --local_dir $$AZURE_STORAGE_ROOT/checkpoints/IFTrain_linear_base_qwen17b_sft1/global_step_200/actor/ --target_dir $$AZURE_STORAGE_ROOT/hf_cache/IFTrain_linear_base_qwen17b_sft1_step200
-      - python hf_upload.py $$AZURE_STORAGE_ROOT/hf_cache/IFTrain_linear_base_qwen17b_sft1_step200 --repo-id billmianz/IFTrain_linear_base_qwen17b_sft1_step200 --repo-type model
+      - python -m verl.model_merger merge --backend fsdp --local_dir $$AZURE_STORAGE_ROOT/checkpoints/IFTrain_noconf_baseline_qwen17b/global_step_500/actor/ --target_dir $$AZURE_STORAGE_ROOT/hf_cache/IFTrain_noconf_baseline_qwen17b_step500
+      - python hf_upload.py $$AZURE_STORAGE_ROOT/hf_cache/IFTrain_noconf_baseline_qwen17b_step500 --repo-id billmianz/IFTrain_noconf_baseline_qwen17b_step500 --repo-type model
+    submit_args:
+      env:
+        DATASET_MOUNT_BLOCK_BASED_CACHE_ENABLED: True
+        SHARED_MEMORY_PERCENT: 0.5
+
+  - name: upload_IFTrain_noconf_linear_base_qwen17b_step500
+    sku: ${NODES}x${MEM}G${GPUS}
+    process_count_per_node: 1
+    sla_tier: Standard
+    priority: high
+    mpi: false
+    command:
+      - set -e
+      - cd $$AMLT_CODE_DIR
+      - pip install -e ".[gpu]"
+      - set +x && [ -f .env ] && set -a && . ./.env && set +a || true && set -x
+      - export AZURE_STORAGE_ROOT=$${AZURE_STORAGE_ROOT:-/mnt/data/v-yinyueqin/projects/mulif}
+      - set +x && [ -n "$$HF_TOKEN" ] && huggingface-cli login --token $$HF_TOKEN || true && set -x
+      - python -m verl.model_merger merge --backend fsdp --local_dir $$AZURE_STORAGE_ROOT/checkpoints/IFTrain_noconf_linear_base_qwen17b/global_step_500/actor/ --target_dir $$AZURE_STORAGE_ROOT/hf_cache/IFTrain_noconf_linear_base_qwen17b_step500
+      - python hf_upload.py $$AZURE_STORAGE_ROOT/hf_cache/IFTrain_noconf_linear_base_qwen17b_step500 --repo-id billmianz/IFTrain_noconf_linear_base_qwen17b_step500 --repo-type model
     submit_args:
       env:
         DATASET_MOUNT_BLOCK_BASED_CACHE_ENABLED: True

@@ -29,7 +29,7 @@ code:
   local_dir: ./
 
 jobs:
-  - name: mulif_ms_IFTrain_noconf_baseline_qwen17b
+  - name: mulif_ms_IFTrain_linear_base_pairwise_alpha1_qwen17b_sft1
     sku: ${NODES}x${MEM}G${GPUS}
     process_count_per_node: 1
     sla_tier: Standard
@@ -45,15 +45,15 @@ jobs:
       - export HF_HOME=$${HF_HOME:-$$AZURE_STORAGE_ROOT/hf_home}
       - export HF_CACHE_DIR=$${HF_CACHE_DIR:-$$AZURE_STORAGE_ROOT/hf_cache}
       - export DATA_DIR=$${DATA_DIR:-$$AZURE_STORAGE_ROOT/verl_data}
-      - export RUN_LOG_DIR=$${RUN_LOG_DIR:-$$AZURE_STORAGE_ROOT/logs/IFTrain_noconf_baseline_qwen17b}
+      - export RUN_LOG_DIR=$${RUN_LOG_DIR:-$$AZURE_STORAGE_ROOT/logs/IFTrain_linear_base_pairwise_alpha1_qwen17b_sft1}
       - export WANDB_DIR=$${WANDB_DIR:-$$AZURE_STORAGE_ROOT/wandb}
       - export RESUME_MODE=$${RESUME_MODE:-auto}
       - export RESUME_FROM_PATH=$${RESUME_FROM_PATH:-null}
       - mkdir -p $$AZURE_STORAGE_ROOT $$HF_HOME $$HF_CACHE_DIR $$DATA_DIR $$RUN_LOG_DIR $$WANDB_DIR
       - set +x && [ -n "$$HF_TOKEN" ] && huggingface-cli login --token $$HF_TOKEN || true && set -x
-      - python hf_data_download.py
+      # - python hf_data_download.py
       # - python hf_model_download.py
-      - bash recipe/mulif_ms/IFTrain_noconf_baseline_qwen17b.sh
+      - bash recipe/mulif_ms/IFTrain_linear_base_pairwise_alpha1_qwen17b_sft1.sh
     submit_args:
       env:
         DATASET_MOUNT_BLOCK_BASED_CACHE_ENABLED: True
