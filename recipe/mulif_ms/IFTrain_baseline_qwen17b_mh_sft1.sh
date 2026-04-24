@@ -93,6 +93,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=500 > "$RUN_LOG_DIR/IFTrain_baseline_qwen17b_mh_sft1.log"
+    trainer.total_training_steps=400 > "$RUN_LOG_DIR/IFTrain_baseline_qwen17b_mh_sft1.log"
 
     # actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
