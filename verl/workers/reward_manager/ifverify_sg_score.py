@@ -26,10 +26,10 @@ reward is set from per-instruction passes (marginals ``P_i`` from the group):
 Config: ``inst_weight_mode``.
 Pairwise add-on config: ``pairwise_alpha`` and ``pairwise_epsilon``.
 
-Per uid group, **VSA**, **VIA**, and **ICR** (instruction coverage rate) are logged as
-``vsa`` / ``via`` / ``icr`` per sample. **inst_mixed_portion** is the fraction of instructions
-whose marginal pass rate ``P_i`` is strictly between 0 and 1 (marginal ``P_i`` still matters for
-linear and log weighting).
+Per uid group, **VSA**, **VIA**, and **ICR** (instruction coverage rate)
+are logged as ``vsa`` / ``via`` / ``icr`` per sample.
+**inst_mixed_portion** is the fraction of instructions whose marginal pass rate ``P_i`` is
+strictly between 0 and 1 (marginal ``P_i`` still matters for linear and log weighting).
 """
 
 import os
@@ -120,7 +120,11 @@ def print_ifverify_debug_report(report: IfverifyDebugReport) -> None:
         k, n_inst = mat.shape
         print(f"  task_id: {tid_s}")
         print(f"  size: K = {k} rollouts × N = {n_inst} instructions  (matrix rows = rollouts)")
-        if report.vsa is not None and report.via is not None and report.icr is not None:
+        if (
+            report.vsa is not None
+            and report.via is not None
+            and report.icr is not None
+        ):
             print(
                 f"  group metrics:  vsa = {report.vsa:.6f}  ·  via = {report.via:.6f}  ·  "
                 f"icr = {report.icr:.6f}"
@@ -263,8 +267,8 @@ class IfverifySgScoreRewardManager(AbstractRewardManager):
     (``mean_i pass_i * (1 - P_i)``), or ``log``
     (``mean_i pass_i * (-log(max(P_i, ε)))``); see ``_weighted_instruction_base_reward``.
 
-    Also logs **VSA**, **VIA**, **ICR**, and **inst_mixed_portion** (share of instructions with
-    ``0 < P_i < 1``) per group for monitoring.
+    Also logs **VSA**, **VIA**, **ICR**, and **inst_mixed_portion**
+    (share of instructions with ``0 < P_i < 1``) per group for monitoring.
     ``follow_instruction_list`` is consumed internally and not returned in
     ``reward_extra_info``.
     """
