@@ -42,8 +42,8 @@ def _truncate(text: str, max_chars: int) -> str:
 def _prompt_vsa(info_matrix: np.ndarray, epsilon: float = 1e-8) -> float:
     """VSA from K×N binary matrix (K rollouts, N instructions).
 
-    SA(i, j) = m_ij / (min(n_i, n_j) + epsilon), with SA(i, j) = 0 when n_i == 0 or n_j == 0.
-    VSA is the variance across all unique pairwise SA(i, j), i < j.
+    SA(i, j) = m_ij / (min(n_i, n_j) + epsilon) when n_i, n_j > 0; pairs with n_i == 0 or n_j == 0
+    are skipped. VSA is the variance across remaining unique pairwise SA(i, j), i < j.
     """
     if info_matrix.size == 0:
         return 0.0
@@ -95,14 +95,20 @@ def _prompt_gii(info_matrix: np.ndarray) -> float:
 
 
 def _prompt_via(info_matrix: np.ndarray) -> float:
-    """Variance of per-instruction pass rates across rollouts (VIA)."""
+    """Variance of per-instruction pass rates across rollouts (VIA).
+
+    Instructions with pass rate (acc) 0 are excluded from the variance.
+    """
     if info_matrix.size == 0:
         return 0.0
     k = info_matrix.shape[0]
     if k == 0:
         return 0.0
     pass_rates = info_matrix.sum(axis=0) / k
-    return float(np.var(pass_rates))
+    nonzero = pass_rates > 0.0
+    if not np.any(nonzero):
+        return 0.0
+    return float(np.var(pass_rates[nonzero]))
 
 
 def _instruction_coverage_rate(info_matrix: np.ndarray) -> float:
