@@ -10,7 +10,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 
 for model in [QWEN3_8B]:
-    for benchmark in [INFORBENCH]:
+    for benchmark in [ADVANCEDIF]:
         llminfer.process_jsonl(
             benchmark.prompt_path,
             f'eval_res/{benchmark.nickname}-{model.nickname}.jsonl',

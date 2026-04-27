@@ -89,3 +89,9 @@ class INFORBENCH:
     nickname = "infobench"
     input_key = "instruction"
     prompt_path = "benchmark/infobench.jsonl"
+
+@dataclass
+class AdvancedIF:
+    nickname = "advancedif"
+    input_key = "prompt"
+    prompt_path = "benchmark_desc/AdvancedIF.jsonl"
