@@ -190,18 +190,26 @@ def _pairwise_synergy_bonus_for_row(
 
     For each satisfied instruction pair (j, k) in ``row``:
     r_s(j, k) = 1 - m_{j,k} / (min(n_j, n_k) + epsilon), with n_j, n_k > 0.
-    Returns: alpha * sum_{(j,k) in satisfied pairs} r_s(j, k).
+    Returns: alpha * (sum_{(j,k) in satisfied pairs} r_s(j, k)) / C(N, 2),
+    where N is the number of instructions in ``row``.
     """
     if alpha == 0.0:
         return 0.0
     if row.size == 0 or info_matrix.size == 0 or counts.size == 0:
         return 0.0
 
+    n_inst = int(row.shape[0])
+    if n_inst < 2:
+        return 0.0
+    max_pairs = (n_inst * (n_inst - 1)) / 2.0
+    if max_pairs <= 0.0:
+        return 0.0
+
     satisfied = np.where(row > 0)[0]
     if satisfied.size < 2:
         return 0.0
 
-    pair_scores: list[float] = []
+    pair_score_sum = 0.0
     for a in range(len(satisfied)):
         j = int(satisfied[a])
         n_j = float(counts[j])
@@ -214,11 +222,11 @@ def _pairwise_synergy_bonus_for_row(
                 continue
             m_jk = float(np.sum(info_matrix[:, j] * info_matrix[:, k]))
             sa_jk = m_jk / (min(n_j, n_k) + float(epsilon))
-            pair_scores.append(1.0 - sa_jk)
+            pair_score_sum += 1.0 - sa_jk
 
-    if not pair_scores:
+    if pair_score_sum == 0.0:
         return 0.0
-    return float(alpha * float(np.sum(pair_scores)))
+    return float(alpha * (pair_score_sum / max_pairs))
 
 
 def _lowest_pair_acc_mask_and_tuples(
