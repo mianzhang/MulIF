@@ -8,18 +8,18 @@ if [ -n "$AZURE_STORAGE_ROOT" ]; then
     DEFAULT_HF_HOME="$AZURE_STORAGE_ROOT/hf_home"
     DEFAULT_HF_CACHE_DIR="$AZURE_STORAGE_ROOT/hf_cache"
     DEFAULT_DATA_DIR="$AZURE_STORAGE_ROOT/verl_data"
-    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/stage2_linear_base_pairwise_alpha1_qwen17b_sft1"
+    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/stage2_linear_base_qwen17b"
     DEFAULT_WANDB_DIR="$AZURE_STORAGE_ROOT/wandb"
-    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/stage2_linear_base_pairwise_alpha1_qwen17b_sft1"
-    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/stage2_linear_base_pairwise_alpha1_qwen17b_sft1"
+    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/stage2_linear_base_qwen17b"
+    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/stage2_linear_base_qwen17b"
 else
     DEFAULT_HF_HOME="$ROOT_DIR/.hf_home"
     DEFAULT_HF_CACHE_DIR="$ROOT_DIR/hf_cache"
     DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
     DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
     DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
-    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/stage2_linear_base_pairwise_alpha1_qwen17b_sft1"
-    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/stage2_linear_base_pairwise_alpha1_qwen17b_sft1"
+    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/stage2_linear_base_qwen17b"
+    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/stage2_linear_base_qwen17b"
 fi
 
 export HF_HOME=${HF_HOME:-$DEFAULT_HF_HOME}
@@ -31,7 +31,7 @@ export CKPT_DIR=${CKPT_DIR:-$DEFAULT_CKPT_DIR}
 export PROFILE_DIR=${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 n_gpus_per_node=4
-MODEL_PATH=$HF_CACHE_DIR/billmianz/qwen17b_sft1
+MODEL_PATH=$HF_CACHE_DIR/Qwen/Qwen3-1.7B
 mkdir -p "$RUN_LOG_DIR" "$WANDB_DIR" "$HF_HOME" "$HF_CACHE_DIR" "$DATA_DIR" "$CKPT_DIR" "$PROFILE_DIR"
 export DEBUG_SAMPLES=10
 
@@ -74,11 +74,10 @@ python3 -m verl.trainer.main_ppo \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
     +reward_model.reward_kwargs.inst_weight_mode=linear \
-    +reward_model.reward_kwargs.pairwise_alpha=1.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='stage2_linear_base_pairwise_alpha1_qwen17b_sft1' \
+    trainer.experiment_name='stage2_linear_base_qwen17b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
     trainer.default_local_dir=$CKPT_DIR \
@@ -90,4 +89,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=400 > "$RUN_LOG_DIR/stage2_linear_base_pairwise_alpha1_qwen17b_sft1.log"
+    trainer.total_training_steps=400 > "$RUN_LOG_DIR/stage2_linear_base_qwen17b.log"

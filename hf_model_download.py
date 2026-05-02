@@ -19,6 +19,7 @@ if model_cache_dir is None:
     model_cache_dir = str(Path(default_storage_root) / "hf_cache") if default_storage_root else "hf_cache"
 
 model_pool = [
+    "billmianz/qwen17b_sft2",
     # "billmianz/IFTrain_baseline_qwen17b_step100",
     # "billmianz/IFTrain_baseline_qwen17b_step200",
     # "billmianz/IFTrain_baseline_qwen17b_step300",
