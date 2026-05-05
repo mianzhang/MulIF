@@ -19,23 +19,12 @@ if model_cache_dir is None:
     model_cache_dir = str(Path(default_storage_root) / "hf_cache") if default_storage_root else "hf_cache"
 
 model_pool = [
-    "billmianz/qwen17b_sft2",
-    # "billmianz/IFTrain_baseline_qwen17b_step100",
-    # "billmianz/IFTrain_baseline_qwen17b_step200",
-    # "billmianz/IFTrain_baseline_qwen17b_step300",
-    # "billmianz/IFTrain_baseline_qwen17b_step400",
-    # "billmianz/IFTrain_baseline_qwen17b_sft1_step100",
-    # "billmianz/IFTrain_baseline_qwen17b_sft1_step200",
-    # "billmianz/IFTrain_baseline_qwen17b_sft1_step300",
-    # "billmianz/IFTrain_baseline_qwen17b_sft1_step400",
-    # "billmianz/IFTrain_linear_base_qwen17b_sft1_step100",
-    # "billmianz/IFTrain_linear_base_qwen17b_sft1_step200",
-    # "billmianz/IFTrain_linear_base_qwen17b_sft1_step300",
-    # "billmianz/IFTrain_linear_base_qwen17b_sft1_step400",
-    # "billmianz/IFTrain_linear_base_qwen17b_step100",
-    # "billmianz/IFTrain_linear_base_qwen17b_step200",
-    # "billmianz/IFTrain_linear_base_qwen17b_step300",
-    # "billmianz/IFTrain_linear_base_qwen17b_step400",
+    "billmianz/qwen17b_sft_hard_100",
+    "billmianz/qwen17b_sft_hard_500",
+    "billmianz/qwen17b_sft_mh_100",
+    "billmianz/qwen17b_sft_mh_500",
+    "billmianz/qwen17b_sft_all_100",
+    "billmianz/qwen17b_sft_all_500",
     ]
 
 for repo_id in model_pool:

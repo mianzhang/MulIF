@@ -7,7 +7,7 @@
 
 export CUDA_VISIBLE_DEVICES=3
 torchrun --standalone --nnodes=1 --nproc-per-node=1 -m verl.trainer.sft_trainer \
-    data.train_files="verl_data/single_medium_hard_sft.parquet" \
+    data.train_files="verl_data/stage2_sft_data_all_100.parquet" \
     data.val_files=null \
     data.train_batch_size=16 \
     data.micro_batch_size_per_gpu=1 \
@@ -24,9 +24,9 @@ torchrun --standalone --nnodes=1 --nproc-per-node=1 -m verl.trainer.sft_trainer 
     optim.clip_grad=1.0 \
     optim.warmup_style=cosine \
     trainer.project_name="MulIF" \
-    trainer.experiment_name="qwen17b-sft2" \
+    trainer.experiment_name="qwen17b_sft_all_100" \
     trainer.total_epochs=1 \
-    trainer.default_local_dir="checkpoints/qwen17b-sft2" \
+    trainer.default_local_dir="checkpoints/qwen17b_sft_all_100" \
     trainer.resume_mode="auto" \
     trainer.save_freq=-1 \
     trainer.test_freq=-1 \
