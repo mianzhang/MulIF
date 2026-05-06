@@ -19,12 +19,13 @@ if model_cache_dir is None:
     model_cache_dir = str(Path(default_storage_root) / "hf_cache") if default_storage_root else "hf_cache"
 
 model_pool = [
-    "billmianz/qwen17b_sft_hard_100",
-    "billmianz/qwen17b_sft_hard_500",
-    "billmianz/qwen17b_sft_mh_100",
-    "billmianz/qwen17b_sft_mh_500",
-    "billmianz/qwen17b_sft_all_100",
-    "billmianz/qwen17b_sft_all_500",
+    "Qwen/Qwen2.5-7B-Instruct"
+    # "billmianz/qwen17b_sft_hard_100",
+    # "billmianz/qwen17b_sft_hard_500",
+    # "billmianz/qwen17b_sft_mh_100",
+    # "billmianz/qwen17b_sft_mh_500",
+    # "billmianz/qwen17b_sft_all_100",
+    # "billmianz/qwen17b_sft_all_500",
     ]
 
 for repo_id in model_pool:
