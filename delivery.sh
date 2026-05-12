@@ -1,6 +1,6 @@
 
 
-for model in IFTrain_baseline_qwen17b IFTrain_linear_base_qwen17b IFTrain_baseline_qwen17b_sft1 IFTrain_linear_base_qwen17b_sft1; do
+for model in stage2_baseline_qwen7b stage2_linear_base_qwen7b_sft_mh_100; do
 
 for step in 100 200 300 400; do
 python -m verl.model_merger merge \
