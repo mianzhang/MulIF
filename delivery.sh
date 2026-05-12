@@ -1,6 +1,6 @@
 
 
-for model in stage2_baseline_qwen7b stage2_linear_base_qwen7b_sft_mh_100; do
+for model in stage2_baseline_qwen7b_sft_mh_100; do
 
 for step in 100 200 300 400; do
 python -m verl.model_merger merge \
