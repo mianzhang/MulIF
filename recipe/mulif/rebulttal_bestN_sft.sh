@@ -6,8 +6,8 @@
 #   - messages: list<struct<role: string, content: string>>
 
 export CUDA_VISIBLE_DEVICES=2
-torchrun --standalone --nnodes=1 --nproc-per-node=2 -m verl.trainer.sft_trainer \
-    data.train_files="verl_data/rebulttal_bestN_sft_data.parquet" \
+torchrun --standalone --nnodes=1 --nproc-per-node=1 -m verl.trainer.sft_trainer \
+    data.train_files="verl_data/rebuttal_bestN_sft.parquet" \
     data.val_files=null \
     data.train_batch_size=16 \
     data.micro_batch_size_per_gpu=1 \
@@ -16,7 +16,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=2 -m verl.trainer.sft_trainer 
     data.truncation=error \
     data.messages_key=messages \
     +data.default_enable_thinking=False \
-    model.path=hf_cache/Qwen3-1.7B \
+    model.path=hf_cache/Qwen/Qwen3-1.7B \
     model.use_remove_padding=True \
     optim.lr=5e-6 \
     optim.weight_decay=0.1 \
@@ -24,9 +24,9 @@ torchrun --standalone --nnodes=1 --nproc-per-node=2 -m verl.trainer.sft_trainer 
     optim.clip_grad=1.0 \
     optim.warmup_style=cosine \
     trainer.project_name="MulIF" \
-    trainer.experiment_name="rebulttal_bestN_sft" \
+    trainer.experiment_name="rebuttal_bestN_sft" \
     trainer.total_epochs=1 \
-    trainer.default_local_dir="checkpoints/rebulttal_bestN_sft" \
+    trainer.default_local_dir="checkpoints/rebuttal_bestN_sft" \
     trainer.resume_mode="auto" \
     trainer.save_freq=-1 \
     trainer.test_freq=-1 \

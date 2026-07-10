@@ -42,22 +42,27 @@ Then run `export $(grep -v '^#' .env | xargs)` to export them.
 
 ## Preparation
 #### Step 1: Data 
-Run `python hf_data_download.py` to download all the training and eval data into `verl_data/`, including:
-- training data: `RECAST_train_3c_12c.parquet`
-- eval data: `AdvancedIF.parquet`, `IFBench.parquet`, `RECAST_c5.parquet`, `RECAST_c10.parquet`
-
+Run `python hf_data_download.py` to download all the training and eval data into `verl_data/`.
 #### Step 2: Base Models
 Run `python hf_model_download.py` to download the base models from huggingface. We only train Qwen3 models at this stage.
 
 
 ## Training
+Run three training jobs:
+
 ```
-sh recipe/mulif_ms/baseline_3c-12c_qwen17b.sh
+sh recipe/mulif_ms/rebuttal_SaR_qwen17b_random_sft.sh
+sh recipe/mulif_ms/rebuttal_SaR_qwen17b_bestN_sft.sh
+sh recipe/mulif_ms/rebuttal_SaR_qwen7b.sh
 ```
 If OOM is encountered, considering decrease the value of `ppo_micro_batch_size` to 16.
 
 - The training log is saved to `log/`
 - The checkpoints are saved to `checkpoints/`
+
+## Delivery
+run `sh delivery.sh` to upload 12 checkpoints.
+
 
 <!-- #### Step 2: Convert FSDP checkpoints to Huggingface format -->
 <!-- (Skip, I will do this on my end) -->
