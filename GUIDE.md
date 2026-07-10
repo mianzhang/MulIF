@@ -29,8 +29,6 @@ TEMP=/workspace/tmp
 TMP=/workspace/tmp
 CUDA_DEVICE_ORDER=PCI_BUS_ID
 RAY_DEBUG=legacy
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_BASE_URL=
 ```
 Then run `export $(grep -v '^#' .env | xargs)` to export them. 
 
@@ -44,7 +42,7 @@ Then run `export $(grep -v '^#' .env | xargs)` to export them.
 #### Step 1: Data 
 Run `python hf_data_download.py` to download all the training and eval data into `verl_data/`.
 #### Step 2: Base Models
-Run `python hf_model_download.py` to download the base models from huggingface. We only train Qwen3 models at this stage.
+Run `python hf_model_download.py` to download the base models from huggingface.
 
 
 ## Training
@@ -61,7 +59,7 @@ If OOM is encountered, considering decrease the value of `ppo_micro_batch_size` 
 - The checkpoints are saved to `checkpoints/`
 
 ## Delivery
-run `sh delivery.sh` to upload 12 checkpoints.
+run `sh delivery.sh` to upload 12 checkpoints. Thx~
 
 
 <!-- #### Step 2: Convert FSDP checkpoints to Huggingface format -->
