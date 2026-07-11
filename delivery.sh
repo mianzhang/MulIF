@@ -1,5 +1,7 @@
 
 
+set -ex
+
 for model in rebuttal_SaR_qwen7b rebuttal_SaR_qwen17b_random_sft rebuttal_SaR_qwen17b_bestN_sft; do
 
 for step in 100 200 300 400; do

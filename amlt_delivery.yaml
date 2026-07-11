@@ -41,6 +41,9 @@ jobs:
       - set +x && [ -f .env ] && set -a && . ./.env && set +a || true && set -x
       - export AZURE_STORAGE_ROOT=$${AZURE_STORAGE_ROOT:-/mnt/data/v-yinyueqin/projects/mulif}
       - set +x && [ -n "$$HF_TOKEN" ] && huggingface-cli login --token $$HF_TOKEN || true && set -x
+      # Pre-check: all 12 checkpoints (3 models x 4 steps) must exist before uploading anything
+      - ls -d $$AZURE_STORAGE_ROOT/checkpoints/rebuttal_SaR_*/global_step_* || true
+      - missing=0; for m in rebuttal_SaR_qwen7b rebuttal_SaR_qwen17b_random_sft rebuttal_SaR_qwen17b_bestN_sft; do for s in 100 200 300 400; do d=$$AZURE_STORAGE_ROOT/checkpoints/$$m/global_step_$$s/actor; if [ -d "$$d" ]; then echo "OK $$d"; else echo "MISSING $$d"; missing=1; fi; done; done; [ "$$missing" -eq 0 ] || { echo "checkpoint pre-check failed, aborting delivery"; exit 1; }
       - bash delivery.sh
     submit_args:
       env:
