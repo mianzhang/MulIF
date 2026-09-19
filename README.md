@@ -5,22 +5,11 @@ Official research code for MulIF, built on
 post-training of language models on multi-constraint instruction-following
 tasks.
 
+Paper: [Mitigating Exploration Bias in RL for Multi-Instruction Following](https://arxiv.org/pdf/2608.23830)
+
 This repository contains the implementation, a baseline configuration, and
 the MulIF training configuration used for comparison. Datasets and models are
 hosted separately on Hugging Face.
-
-## Repository layout
-
-```text
-MulIF/
-├── recipe/mulif/
-│   ├── train_baseline.sh         # Baseline configuration
-│   └── train_mulif.sh            # MulIF configuration
-├── verl/                         # verl and MulIF implementation
-├── hf_data_download.py           # Dataset downloader
-├── README_EVALUATION.md          # Evaluation documentation
-└── .env.example                  # Environment template
-```
 
 ## Installation
 
@@ -72,19 +61,20 @@ source .env
 set +a
 ```
 
-Use `hf auth login` for gated Hugging Face resources and `wandb login` for
-experiment tracking. Do not commit credentials.
+Use `wandb login` for experiment tracking. Do not commit credentials.
 
 ## Data and models
 
-Download the released dataset from
-[`billmianz/MulIF`](https://huggingface.co/datasets/billmianz/MulIF):
+`hf_data_download.py` downloads the training dataset **IFTrain** and the main
+validation dataset **IFBench** from the
+[`billmianz/MulIF`](https://huggingface.co/datasets/billmianz/MulIF)
+Hugging Face dataset repository:
 
 ```bash
 python hf_data_download.py
 ```
 
-The training scripts use:
+The downloaded files used by the training scripts are:
 
 ```text
 verl_data/IFTrain_3c_5c.parquet
