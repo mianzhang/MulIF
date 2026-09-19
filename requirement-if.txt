@@ -1,4 +1,5 @@
 absl-py
+openai
 langdetect
 nltk
 immutabledict

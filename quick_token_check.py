@@ -57,8 +57,8 @@ Examples:
     parser.add_argument(
         '--tokenizer',
         type=str,
-        default='/localdisk/models/Qwen/Qwen3-0.6B',
-        help='Path to the tokenizer (default: /localdisk/models/Qwen/Qwen3-0.6B)'
+        default='Qwen/Qwen3-0.6B',
+        help='Hugging Face model ID or local tokenizer path (default: Qwen/Qwen3-0.6B)'
     )
     
     parser.add_argument(

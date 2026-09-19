@@ -1,45 +1,17 @@
 
 
-[ -f .env ] && export $(grep -v '^#' .env | xargs)
-export ROOT_DIR=${ROOT_DIR:-$(pwd)}
-export AZURE_STORAGE_ROOT=${AZURE_STORAGE_ROOT:-}
-
-if [ -n "$AZURE_STORAGE_ROOT" ]; then
-    DEFAULT_HF_HOME="$AZURE_STORAGE_ROOT/hf_home"
-    DEFAULT_HF_CACHE_DIR="$AZURE_STORAGE_ROOT/hf_cache"
-    DEFAULT_DATA_DIR="$AZURE_STORAGE_ROOT/verl_data"
-    DEFAULT_RUN_LOG_DIR="$AZURE_STORAGE_ROOT/logs/stage2_data_ablation_qwen17b_sft_mh_100"
-    DEFAULT_WANDB_DIR="$AZURE_STORAGE_ROOT/wandb"
-    DEFAULT_CKPT_DIR="$AZURE_STORAGE_ROOT/checkpoints/stage2_data_ablation_qwen17b_sft_mh_100"
-    DEFAULT_PROFILE_DIR="$AZURE_STORAGE_ROOT/profile/stage2_data_ablation_qwen17b_sft_mh_100"
-else
-    DEFAULT_HF_HOME="$ROOT_DIR/.hf_home"
-    DEFAULT_HF_CACHE_DIR="$ROOT_DIR/hf_cache"
-    DEFAULT_DATA_DIR="$ROOT_DIR/verl_data"
-    DEFAULT_RUN_LOG_DIR="$ROOT_DIR/log"
-    DEFAULT_WANDB_DIR="$ROOT_DIR/wandb"
-    DEFAULT_CKPT_DIR="$ROOT_DIR/checkpoints/MulIF/stage2_data_ablation_qwen17b_sft_mh_100"
-    DEFAULT_PROFILE_DIR="$ROOT_DIR/outputs/profile/stage2_data_ablation_qwen17b_sft_mh_100"
-fi
-
-export HF_HOME=${HF_HOME:-$DEFAULT_HF_HOME}
-export HF_CACHE_DIR=${HF_CACHE_DIR:-$DEFAULT_HF_CACHE_DIR}
-export DATA_DIR=${DATA_DIR:-$DEFAULT_DATA_DIR}
-export RUN_LOG_DIR=${RUN_LOG_DIR:-$DEFAULT_RUN_LOG_DIR}
-export WANDB_DIR=${WANDB_DIR:-$DEFAULT_WANDB_DIR}
-export CKPT_DIR=${CKPT_DIR:-$DEFAULT_CKPT_DIR}
-export PROFILE_DIR=${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-n_gpus_per_node=4
-MODEL_PATH=$HF_CACHE_DIR/billmianz/qwen17b_sft_mh_100
-mkdir -p "$RUN_LOG_DIR" "$WANDB_DIR" "$HF_HOME" "$HF_CACHE_DIR" "$DATA_DIR" "$CKPT_DIR" "$PROFILE_DIR"
+export $(grep -v '^#' .env | xargs)
+export CUDA_VISIBLE_DEVICES=2,3
+n_gpus_per_node=2
+MODEL_PATH=Qwen/Qwen3-1.7B
 export DEBUG_SAMPLES=10
+mkdir -p log
 
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$DATA_DIR/IFTrain_3c_5c.parquet \
-    data.val_files="[$DATA_DIR/IFBench.parquet]" \
+    data.train_files=$ROOT_DIR/verl_data/IFTrain_3c_5c.parquet \
+    data.val_files="[$ROOT_DIR/verl_data/IFBench.parquet]" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=1024 \
@@ -74,19 +46,18 @@ python3 -m verl.trainer.main_ppo \
     reward_model.reward_manager=ifverify_sg_score \
     reward_model.launch_reward_fn_async=False \
     +reward_model.reward_kwargs.inst_weight_mode=linear \
+    +reward_model.reward_kwargs.pairwise_alpha=1.0 \
     trainer.critic_warmup=0.0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='MulIF' \
-    trainer.experiment_name='stage2_data_ablation_qwen17b_sft_mh_100' \
+    trainer.experiment_name='IFTrain_mulif_qwen3_1_7b' \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=1 \
-    trainer.default_local_dir=$CKPT_DIR \
-    global_profiler.save_path=$PROFILE_DIR \
-    trainer.save_freq=10 \
-    trainer.val_before_train=True \
+    trainer.save_freq=25 \
+    trainer.val_before_train=False \
     trainer.val_only=False \
-    trainer.resume_mode=auto \
+    trainer.resume_mode=disable \
     trainer.resume_from_path=null \
     trainer.test_freq=25 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=400 > "$RUN_LOG_DIR/stage2_data_ablation_qwen17b_sft_mh_100.log"
+    trainer.total_training_steps=500 > log/IFTrain_mulif_qwen3_1_7b.log
